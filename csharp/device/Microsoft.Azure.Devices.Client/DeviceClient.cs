@@ -37,6 +37,11 @@ namespace Microsoft.Azure.Devices.Client
         /// Advanced Message Queuing Protocol transport over WebSocket.
         /// </summary>
         Amqp_WebSocket
+
+        /// <summary>
+        /// Message Queuing Telemetry Transport.
+        /// </summary>
+        Mqtt
     }
 
     /// <summary>
@@ -49,9 +54,9 @@ namespace Microsoft.Azure.Devices.Client
 
         static readonly RegexOptions regexOptions = RegexOptions.Compiled | RegexOptions.IgnoreCase;
         static readonly Regex DeviceIdParameterRegex = new Regex(DeviceIdParameterPattern, regexOptions);
-        readonly DeviceClientHelper impl;
+        readonly TansportHandlerBase impl;
 
-        DeviceClient(DeviceClientHelper impl)
+        DeviceClient(TansportHandlerBase impl)
         {
             this.impl = impl;
         }
@@ -139,20 +144,22 @@ namespace Microsoft.Azure.Devices.Client
             }
 
             var iotHubConnectionString = IotHubConnectionString.Parse(connectionString);
-            if (transportType == TransportType.Amqp || transportType == TransportType.Amqp_WebSocket)
+            switch (transportType)
             {
+                case TransportType.Amqp:
+                case TransportType.Amqp_WebSocket:
 #if WINDOWS_UWP
-                throw new NotImplementedException();
+                    throw new NotImplementedException();
 #else
-                return new DeviceClient(new AmqpDeviceClient(iotHubConnectionString, (transportType == TransportType.Amqp_WebSocket) ? true : false));
+                    return new DeviceClient(new DeviceClientAmqpTransportHandler(iotHubConnectionString, (transportType == TransportType.Amqp_WebSocket) ? true : false));
 #endif
+                case TransportType.Http1:
+                    return new DeviceClient(new DeviceClientHttpTransportHandler(iotHubConnectionString));
+                case TransportType.Mqtt:
+                    return new DeviceClient(new MqttDeviceClient(iotHubConnectionString));
+                default:
+                    throw new InvalidOperationException("Unsupported Transport Type {0}".FormatInvariant(transportType));
             }
-            else if (transportType == TransportType.Http1)
-            {
-                return new DeviceClient(new HttpDeviceClient(iotHubConnectionString));
-            }
-
-            throw new InvalidOperationException("Unsupported Transport Type {0}".FormatInvariant(transportType));
         }
 
         /// <summary>
