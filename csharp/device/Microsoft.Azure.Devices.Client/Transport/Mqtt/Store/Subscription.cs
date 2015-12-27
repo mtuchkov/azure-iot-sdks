@@ -1,12 +1,12 @@
 // Copyright (c) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
-{
-    using System;
-    using System.Diagnostics.Contracts;
-    using DotNetty.Codecs.Mqtt.Packets;
+using System;
+using System.Diagnostics.Contracts;
+using DotNetty.Codecs.Mqtt.Packets;
 
+namespace Microsoft.Azure.Devices.Client.Transport.Mqtt.Store
+{
     public class Subscription
     {
         public Subscription(string topicFilter, QualityOfService qualityOfService)

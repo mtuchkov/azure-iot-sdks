@@ -1,16 +1,14 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
+namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 {
     using System;
-    using System.Collections;
     using System.Collections.Generic;
     using System.Diagnostics.Contracts;
     using System.IO;
     using System.Net;
     using System.Threading.Tasks;
-    using DotNetty.Buffers;
     using DotNetty.Codecs.Mqtt.Packets;
     using DotNetty.Common;
     using DotNetty.Common.Utilities;
@@ -18,9 +16,9 @@ namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
     using DotNetty.Transport.Channels;
     using Microsoft.Azure.Devices.Client;
     using Microsoft.Azure.Devices.Client.Exceptions;
-    using Microsoft.Azure.Devices.Client.Transport.Mqtt;
+    using Microsoft.Azure.Devices.Client.Transport.Mqtt.Store;
 
-    internal sealed class MqttIotHubAdapter : ChannelHandlerAdapter
+    sealed class MqttIotHubAdapter : ChannelHandlerAdapter, IMqttIotHubAdapter
     {
         const string UnmatchedFlagPropertyName = "Unmatched";
         const string SubjectPropertyName = "Subject";
@@ -41,26 +39,28 @@ namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
         readonly RequestAckPairProcessor<AckPendingMessageState, PublishPacket> publishPubAckProcessor;
         readonly ITopicNameRouter topicNameRouter;
         Dictionary<string, string> sessionContext;
-        Identity identity;
         readonly QualityOfService maxSupportedQosToClient;
         TimeSpan keepAliveTimeout;
         readonly ISessionStatePersistenceProvider sessionStateManager;
-        readonly IAuthenticationProvider authProvider;
         Queue<Packet> connectWithSubscribeQueue;
+        Queue<Packet> subscriptionChangeQueue;
+        readonly string clientId;
 
-        public MqttIotHubAdapter(Settings settings, ISessionStatePersistenceProvider sessionStateManager, IAuthenticationProvider authProvider,
+        public MqttIotHubAdapter(
+            string clientId,
+            Settings settings, 
+            ISessionStatePersistenceProvider sessionStateManager,
             ITopicNameRouter topicNameRouter)
         {
             Contract.Requires(settings != null);
             Contract.Requires(sessionStateManager != null);
-            Contract.Requires(authProvider != null);
             Contract.Requires(topicNameRouter != null);
 
             this.maxSupportedQosToClient = QualityOfService.AtLeastOnce;
             this.settings = settings;
             this.sessionStateManager = sessionStateManager;
-            this.authProvider = authProvider;
             this.topicNameRouter = topicNameRouter;
+            this.clientId = clientId;
 
             this.publishProcessor = new PacketAsyncProcessor<PublishPacket>(this.PublishToServerAsync);
             this.publishProcessor.Completion.OnFault(ShutdownOnPublishToServerFaultAction);
@@ -79,27 +79,18 @@ namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
         {
             get { return this.connectWithSubscribeQueue ?? (this.connectWithSubscribeQueue = new Queue<Packet>(4)); }
         }
-
-        bool ConnectedToHub
-        {
-            get { return this.iotHubClient != null; }
-        }
-
+        
         int InboundBacklogSize
         {
             get
             {
-                return this.publishProcessor.BacklogSize
-                    + this.publishPubAckProcessor.BacklogSize
+                return this.publishProcessor.BacklogSize + this.publishPubAckProcessor.BacklogSize;
             }
         }
 
         int MessagePendingAckCount
         {
-            get
-            {
-                return this.publishPubAckProcessor.RequestPendingAckCount
-            }
+            get { return this.publishPubAckProcessor.RequestPendingAckCount; }
         }
 
         #region IChannelHandler overrides
@@ -251,7 +242,7 @@ namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
                     if (!this.sessionState.IsTransient)
                     {
                         // save updated session state, make it current once successfully set
-                        await this.sessionStateManager.SetAsync(this.identity.ToString(), newState);
+                        await this.sessionStateManager.SetAsync(this.clientId, newState);
                     }
 
                     this.sessionState = newState;
@@ -282,7 +273,7 @@ namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
 
         async Task PublishToServerAsync(IChannelHandlerContext context, PublishPacket packet)
         {
-            if (!this.ConnectedToHub)
+            if (!this.IsInState(StateFlags.Closed))
             {
                 return;
             }
@@ -298,7 +289,7 @@ namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
 
                 Util.CompleteMessageFromPacket(message, packet, this.settings);
 
-                await this.iotHubClient.SendAsync(message);
+                await context.WriteAsync(packet);
             }
 
             if (!this.IsInState(StateFlags.Closed))
@@ -338,21 +329,11 @@ namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
                 string messageDeviceId;
                 if (message.Properties.TryGetValue(DeviceIdParam, out messageDeviceId))
                 {
-                    if (!this.identity.DeviceId.Equals(messageDeviceId, StringComparison.Ordinal))
-                    {
-                        throw new InvalidOperationException(
-                            string.Format("Device ID provided in topic name ({0}) does not match ID of the device publishing message ({1}). IoT Hub Name: {2}",
-                            messageDeviceId, this.identity.DeviceId, this.identity.IoTHubHostName));
-                    }
                     message.Properties.Remove(DeviceIdParam);
                 }
             }
             else
             {
-                if (MqttIotHubAdapterEventSource.Log.IsWarningEnabled)
-                {
-                    MqttIotHubAdapterEventSource.Log.Warning("Topic name could not be matched against any of the configured routes. Falling back to default telemetry settings.", packet.ToString());
-                }
                 routeType = RouteDestinationType.Telemetry;
                 message.Properties[UnmatchedFlagPropertyName] = bool.TrueString;
                 message.Properties[SubjectPropertyName] = packet.TopicName;
@@ -378,7 +359,7 @@ namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
 
             try
             {
-                Message message = await this.iotHubClient.ReceiveAsync();
+                Message message = null;//await this.iotHubClient.ReceiveAsync();
                 if (message == null)
                 {
                     // link to IoT Hub has been closed
@@ -509,21 +490,22 @@ namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
 
         async Task RejectMessageAsync(Message message)
         {
-            await this.iotHubClient.RejectAsync(message.LockToken); // awaiting guarantees that we won't complete consecutive message before this is completed.
+//            await this.iotHubClient.RejectAsync(message.LockToken); // awaiting guarantees that we won't complete consecutive message before this is completed.
         }
 
         Task PublishToClientQos0Async(IChannelHandlerContext context, Message message, PublishPacket packet)
         {
-            if (message.DeliveryCount == 0)
-            {
-                return Task.WhenAll(
-                    this.iotHubClient.CompleteAsync(message.LockToken),
-                    Util.WriteMessageAsync(context, packet));
-            }
-            else
-            {
-                return this.iotHubClient.CompleteAsync(message.LockToken);
-            }
+//            if (message.DeliveryCount == 0)
+//            {
+//                return Task.WhenAll(
+//                    this.iotHubClient.CompleteAsync(message.LockToken),
+//                    Util.WriteMessageAsync(context, packet));
+//            }
+//            else
+//            {
+//                return this.iotHubClient.CompleteAsync(message.LockToken);
+//            }
+            return Util.WriteMessageAsync(context, packet);
         }
 
         Task PublishToClientQos1Async(IChannelHandlerContext context, Message message, PublishPacket packet)
@@ -538,7 +520,7 @@ namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
             // todo: is try-catch needed here?
             try
             {
-                await this.iotHubClient.CompleteAsync(message.LockToken);
+                //await this.iotHubClient.CompleteAsync(message.LockToken);
 
                 if (this.publishPubAckProcessor.ResumeRetransmission(context))
                 {
@@ -570,7 +552,7 @@ namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
 
             try
             {
-                await this.iotHubClient.AbandonAsync(messageInfo.LockToken);
+                //await this.iotHubClient.AbandonAsync(messageInfo.LockToken);
 
                 if (!wasReceiving)
                 {
@@ -701,23 +683,11 @@ namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
             return found;
         }
 
-        async void ShutdownOnReceiveError(IChannelHandlerContext context, string exception)
+        void ShutdownOnReceiveError(IChannelHandlerContext context, string exception)
         {
             this.publishPubAckProcessor.Abort();
             this.publishProcessor.Abort();
 
-            IDeviceClient hub = this.iotHubClient;
-            if (hub != null)
-            {
-                this.iotHubClient = null;
-                try
-                {
-                    await hub.DisposeAsync();
-                }
-                catch (Exception ex)
-                {
-                }
-            }
             ShutdownOnError(context, "Receive", exception);
         }
 
@@ -744,38 +714,14 @@ namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
                 }
 
                 this.stateFlags = StateFlags.ProcessingConnect;
-                AuthenticationResult authResult = await this.authProvider.AuthenticateAsync(packet.ClientId,
-                    packet.Username, packet.Password, context.Channel.RemoteAddress);
-                if (authResult == null)
-                {
-                    connAckSent = true;
-                    await Util.WriteMessageAsync(context, new ConnAckPacket
-                    {
-                        ReturnCode = ConnectReturnCode.RefusedNotAuthorized
-                    });
-                    ShutdownOnError(context, "Authentication failed.");
-                    return;
-                }
-
-                this.identity = authResult.Identity;
-
-                this.iotHubClient = await this.deviceClientFactory(authResult);
-
-                bool sessionPresent = await this.EstablishSessionStateAsync(this.identity.ToString(), packet.CleanSession);
+                
+                bool sessionPresent = await this.EstablishSessionStateAsync(this.clientId, packet.CleanSession);
 
                 this.keepAliveTimeout = this.DeriveKeepAliveTimeout(packet);
 
-                if (packet.HasWill)
-                {
-                    var will = new PublishPacket(packet.WillQualityOfService, false, packet.WillRetain);
-                    will.TopicName = packet.WillTopicName;
-                    will.Payload = packet.WillMessage;
-                    this.willPacket = will;
-                }
-
                 this.sessionContext = new Dictionary<string, string>
                 {
-                    { DeviceIdParam, this.identity.DeviceId }
+                    { DeviceIdParam, this.clientId }
                 };
 
                 this.StartReceiving(context);
@@ -973,7 +919,7 @@ namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
 
         async void CloseIotHubConnection()
         {
-            if (!this.ConnectedToHub)
+            if (this.IsInState(StateFlags.WaitingForConnect))
             {
                 // closure happened before IoT Hub connection was established or it was initiated due to disconnect
                 return;
@@ -986,14 +932,10 @@ namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
                 await Task.WhenAll(
                     this.publishProcessor.Completion,
                     this.publishPubAckProcessor.Completion);
-
-                IDeviceClient hub = this.iotHubClient;
-                this.iotHubClient = null;
-                await hub.DisposeAsync();
             }
-            catch (Exception ex)
+            catch
             {
-                
+                // ignored on closing
             }
         }
 
@@ -1042,598 +984,20 @@ namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
             Receiving = 1 << 4,
             Closed = 1 << 5
         }
-    }
 
-    public static class TaskExtensions
-    {
-        public static void OnFault(this Task task, Action<Task> faultAction)
+        public Task SendEventAsync(Message repeat)
         {
-            switch (task.Status)
-            {
-                case TaskStatus.RanToCompletion:
-                case TaskStatus.Canceled:
-                    break;
-                case TaskStatus.Faulted:
-                    faultAction(task);
-                    break;
-                default:
-                    task.ContinueWith(faultAction, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
-                    break;
-            }
+            throw new NotImplementedException();
         }
 
-        public static void OnFault(this Task task, Action<Task, object> faultAction, object state)
+        public Task SendEventAsync(Message message, IDictionary<string, string> properties)
         {
-            switch (task.Status)
-            {
-                case TaskStatus.RanToCompletion:
-                case TaskStatus.Canceled:
-                    break;
-                case TaskStatus.Faulted:
-                    faultAction(task, state);
-                    break;
-                default:
-                    task.ContinueWith(faultAction, state, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
-                    break;
-            }
-        }
-    }
-
-    static class Util
-    {
-        const char SegmentSeparatorChar = '/';
-        const char SingleSegmentWildcardChar = '+';
-        const char MultiSegmentWildcardChar = '#';
-        static readonly char[] WildcardChars = { MultiSegmentWildcardChar, SingleSegmentWildcardChar };
-        const string IotHubTrueString = "true";
-
-        public static bool CheckTopicFilterMatch(string topicName, string topicFilter)
-        {
-            int topicFilterIndex = 0;
-            int topicNameIndex = 0;
-            while (topicNameIndex < topicName.Length && topicFilterIndex < topicFilter.Length)
-            {
-                int wildcardIndex = topicFilter.IndexOfAny(WildcardChars, topicFilterIndex);
-                if (wildcardIndex == -1)
-                {
-                    int matchLength = Math.Max(topicFilter.Length - topicFilterIndex, topicName.Length - topicNameIndex);
-                    return string.Compare(topicFilter, topicFilterIndex, topicName, topicNameIndex, matchLength, StringComparison.Ordinal) == 0;
-                }
-                else
-                {
-                    if (topicFilter[wildcardIndex] == MultiSegmentWildcardChar)
-                    {
-                        if (wildcardIndex == 0) // special case -- any topic name would match
-                        {
-                            return true;
-                        }
-                        else
-                        {
-                            int matchLength = wildcardIndex - topicFilterIndex - 1;
-                            if (string.Compare(topicFilter, topicFilterIndex, topicName, topicNameIndex, matchLength, StringComparison.Ordinal) == 0
-                                && (topicName.Length == topicNameIndex + matchLength || (topicName.Length > topicNameIndex + matchLength && topicName[topicNameIndex + matchLength] == SegmentSeparatorChar)))
-                            {
-                                // paths match up till wildcard and either it is parent topic in hierarchy (one level above # specified) or any child topic under a matching parent topic
-                                return true;
-                            }
-                            else
-                            {
-                                return false;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        // single segment wildcard
-                        int matchLength = wildcardIndex - topicFilterIndex;
-                        if (matchLength > 0 && string.Compare(topicFilter, topicFilterIndex, topicName, topicNameIndex, matchLength, StringComparison.Ordinal) != 0)
-                        {
-                            return false;
-                        }
-                        topicNameIndex = topicName.IndexOf(SegmentSeparatorChar, topicNameIndex + matchLength);
-                        topicFilterIndex = wildcardIndex + 1;
-                        if (topicNameIndex == -1)
-                        {
-                            // there's no more segments following matched one
-                            return topicFilterIndex == topicFilter.Length;
-                        }
-                    }
-                }
-            }
-
-            return topicFilterIndex == topicFilter.Length && topicNameIndex == topicName.Length;
+            throw new NotImplementedException();
         }
 
-        public static QualityOfService DeriveQos(Message message, Settings config)
+        public Task<Message> ReceiveAsync(TimeSpan timeout)
         {
-            QualityOfService qos;
-            string qosValue;
-            if (message.Properties.TryGetValue(config.QoSPropertyName, out qosValue))
-            {
-                int qosAsInt;
-                if (int.TryParse(qosValue, out qosAsInt))
-                {
-                    qos = (QualityOfService)qosAsInt;
-                    if (qos > QualityOfService.ExactlyOnce)
-                    {
-                        qos = config.DefaultPublishToClientQoS;
-                    }
-                }
-                else
-                {
-                    qos = config.DefaultPublishToClientQoS;
-                }
-            }
-            else
-            {
-                qos = config.DefaultPublishToClientQoS;
-            }
-            return qos;
+            throw new NotImplementedException();
         }
-
-        public static Message CompleteMessageFromPacket(Message message, PublishPacket packet, Settings settings)
-        {
-            message.MessageId = Guid.NewGuid().ToString("N");
-            if (packet.RetainRequested)
-            {
-                message.Properties[settings.RetainPropertyName] = IotHubTrueString;
-            }
-            if (packet.Duplicate)
-            {
-                message.Properties[settings.DupPropertyName] = IotHubTrueString;
-            }
-
-            return message;
-        }
-
-        public static async Task<PublishPacket> ComposePublishPacketAsync(IChannelHandlerContext context, Message message,
-            QualityOfService qos, string topicName)
-        {
-            bool duplicate = message.DeliveryCount > 0;
-
-            var packet = new PublishPacket(qos, duplicate, false);
-            packet.TopicName = topicName;
-            if (qos > QualityOfService.AtMostOnce)
-            {
-                int packetId = unchecked((ushort)message.SequenceNumber);
-                switch (qos)
-                {
-                    case QualityOfService.AtLeastOnce:
-                        packetId &= 0x7FFF; // clear 15th bit
-                        break;
-                    case QualityOfService.ExactlyOnce:
-                        packetId |= 0x8000; // set 15th bit
-                        break;
-                    default:
-                        throw new ArgumentOutOfRangeException("qos", qos, null);
-                }
-                packet.PacketId = packetId;
-            }
-            using (Stream payloadStream = message.GetBodyStream())
-            {
-                long streamLength = payloadStream.Length;
-                if (streamLength > int.MaxValue)
-                {
-                    throw new InvalidOperationException(string.Format("Message size ({0} bytes) is too big to process.", streamLength));
-                }
-
-                int length = (int)streamLength;
-                IByteBuffer buffer = context.Channel.Allocator.Buffer(length, length);
-                await buffer.WriteBytesAsync(payloadStream, length);
-                Contract.Assert(buffer.ReadableBytes == length);
-
-                packet.Payload = buffer;
-            }
-            return packet;
-        }
-
-        internal static IAuthenticationMethod DeriveAuthenticationMethod(IAuthenticationMethod currentAuthenticationMethod, AuthenticationResult authenticationResult)
-        {
-            string deviceId = authenticationResult.Identity.DeviceId;
-            switch (authenticationResult.Properties.Scope)
-            {
-                case AuthenticationScope.None:
-                    var policyKeyAuth = currentAuthenticationMethod as DeviceAuthenticationWithSharedAccessPolicyKey;
-                    if (policyKeyAuth != null)
-                    {
-                        return new DeviceAuthenticationWithSharedAccessPolicyKey(deviceId, policyKeyAuth.PolicyName, policyKeyAuth.Key);
-                    }
-                    var deviceKeyAuth = currentAuthenticationMethod as DeviceAuthenticationWithRegistrySymmetricKey;
-                    if (deviceKeyAuth != null)
-                    {
-                        return new DeviceAuthenticationWithRegistrySymmetricKey(deviceId, deviceKeyAuth.DeviceId);
-                    }
-                    var deviceTokenAuth = currentAuthenticationMethod as DeviceAuthenticationWithToken;
-                    if (deviceTokenAuth != null)
-                    {
-                        return new DeviceAuthenticationWithToken(deviceId, deviceTokenAuth.Token);
-                    }
-                    throw new InvalidOperationException("");
-                case AuthenticationScope.SasToken:
-                    return new DeviceAuthenticationWithToken(deviceId, authenticationResult.Properties.Secret);
-                case AuthenticationScope.DeviceKey:
-                    return new DeviceAuthenticationWithRegistrySymmetricKey(deviceId, authenticationResult.Properties.Secret);
-                case AuthenticationScope.HubKey:
-                    return new DeviceAuthenticationWithSharedAccessPolicyKey(deviceId, authenticationResult.Properties.PolicyName, authenticationResult.Properties.Secret);
-                default:
-                    throw new InvalidOperationException("Unexpected AuthenticationScope value: " + authenticationResult.Properties.Scope);
-            }
-        }
-
-        public static SubAckPacket AddSubscriptions(ISessionState session, SubscribePacket packet, QualityOfService maxSupportedQos)
-        {
-            List<Subscription> subscriptions = session.Subscriptions;
-            var returnCodes = new List<QualityOfService>(subscriptions.Count);
-            foreach (SubscriptionRequest request in packet.Requests)
-            {
-                Subscription existingSubscription = null;
-                for (int i = subscriptions.Count - 1; i >= 0; i--)
-                {
-                    Subscription subscription = subscriptions[i];
-                    if (subscription.TopicFilter.Equals(request.TopicFilter, StringComparison.Ordinal))
-                    {
-                        subscriptions.RemoveAt(i);
-                        existingSubscription = subscription;
-                        break;
-                    }
-                }
-
-                QualityOfService finalQos = request.QualityOfService < maxSupportedQos ? request.QualityOfService : maxSupportedQos;
-
-                subscriptions.Add(existingSubscription == null
-                    ? new Subscription(request.TopicFilter, request.QualityOfService)
-                    : existingSubscription.CreateUpdated(finalQos));
-
-                returnCodes.Add(finalQos);
-            }
-            var ack = new SubAckPacket
-            {
-                PacketId = packet.PacketId,
-                ReturnCodes = returnCodes
-            };
-            return ack;
-        }
-
-        public static UnsubAckPacket RemoveSubscriptions(ISessionState session, UnsubscribePacket packet)
-        {
-            List<Subscription> subscriptions = session.Subscriptions;
-            foreach (string topicToRemove in packet.TopicFilters)
-            {
-                for (int i = subscriptions.Count - 1; i >= 0; i--)
-                {
-                    if (subscriptions[i].TopicFilter.Equals(topicToRemove, StringComparison.Ordinal))
-                    {
-                        subscriptions.RemoveAt(i);
-                        break;
-                    }
-                }
-            }
-            var ack = new UnsubAckPacket
-            {
-                PacketId = packet.PacketId
-            };
-            return ack;
-        }
-
-        public static async Task WriteMessageAsync(IChannelHandlerContext context, object message)
-        {
-            await context.WriteAndFlushAsync(message);
-        }
-    }
-
-    public enum AuthenticationScope
-    {
-        None,
-        SasToken,
-        DeviceKey,
-        HubKey
-    }
-
-    
-    public sealed class AuthenticationProperties
-    {
-        public static AuthenticationProperties SuccessWithSasToken(string token)
-        {
-            return new AuthenticationProperties
-            {
-                Scope = AuthenticationScope.SasToken,
-                Secret = token,
-            };
-        }
-
-        public static AuthenticationProperties SuccessWithHubKey(string keyName, string keyValue)
-        {
-            return new AuthenticationProperties
-            {
-                Scope = AuthenticationScope.HubKey,
-                PolicyName = keyName,
-                Secret = keyValue
-            };
-        }
-
-        public static AuthenticationProperties SuccessWithDeviceKey(string keyValue)
-        {
-            return new AuthenticationProperties
-            {
-                Scope = AuthenticationScope.DeviceKey,
-                Secret = keyValue
-            };
-        }
-
-        public static AuthenticationProperties SuccessWithDefaultCredentials()
-        {
-            return new AuthenticationProperties
-            {
-                Scope = AuthenticationScope.None
-            };
-        }
-
-        AuthenticationProperties()
-        {
-        }
-
-        public string PolicyName { get; private set; }
-
-        public string Secret { get; private set; }
-
-        public AuthenticationScope Scope { get; private set; }
-    }
-
-    public sealed class AuthenticationResult
-    {
-        public static AuthenticationResult SuccessWithSasToken(Identity identity, string token)
-        {
-            return new AuthenticationResult
-            {
-                Properties = AuthenticationProperties.SuccessWithSasToken(token),
-                Identity = identity
-            };
-        }
-
-        public static AuthenticationResult SuccessWithHubKey(Identity identity, string keyName, string keyValue)
-        {
-            return new AuthenticationResult
-            {
-                Identity = identity,
-                Properties = AuthenticationProperties.SuccessWithHubKey(keyName, keyValue)
-            };
-        }
-
-        public static AuthenticationResult SuccessWithDeviceKey(Identity identity, string keyValue)
-        {
-            return new AuthenticationResult
-            {
-                Identity = identity,
-                Properties = AuthenticationProperties.SuccessWithDeviceKey(keyValue)
-            };
-        }
-
-        public static AuthenticationResult SuccessWithDefaultCredentials(Identity identity)
-        {
-            return new AuthenticationResult
-            {
-                Identity = identity,
-                Properties = AuthenticationProperties.SuccessWithDefaultCredentials()
-            };
-        }
-
-        AuthenticationResult()
-        {
-        }
-
-        public AuthenticationProperties Properties { get; private set; }
-
-        public Identity Identity { get; private set; }
-    }
-
-    public sealed class Identity
-    {
-        public string IoTHubHostName { get; private set; }
-
-        public string DeviceId { get; private set; }
-
-        public Identity(string iotHubHostName, string deviceId)
-        {
-            this.IoTHubHostName = iotHubHostName;
-            this.DeviceId = deviceId;
-        }
-
-        public override string ToString()
-        {
-            return this.IoTHubHostName + "/" + this.DeviceId;
-        }
-
-        public static Identity Parse(string username)
-        {
-            int delimiterPos = username.IndexOf("/", StringComparison.Ordinal);
-            if (delimiterPos < 0)
-            {
-                throw new FormatException(string.Format("Invalid username format: {0}", username));
-            }
-            string iotHubName = username.Substring(0, delimiterPos);
-            string deviceId = username.Substring(delimiterPos + 1);
-
-            return new Identity(iotHubName, deviceId);
-        }
-    }
-
-    internal interface IAuthenticationProvider
-    {
-        Task<AuthenticationResult> AuthenticateAsync(string clientId, string username, string password, EndPoint clientAddress);
-    }
-
-    sealed class CompletionPendingMessageState : IPacketReference, ISupportRetransmission
-    {
-        public CompletionPendingMessageState(int packetId, string lockToken,
-             IQos2MessageDeliveryState deliveryState, PreciseTimeSpan startTimestamp)
-        {
-            this.PacketId = packetId;
-            this.LockToken = lockToken;
-            this.DeliveryState = deliveryState;
-            this.StartTimestamp = startTimestamp;
-            this.SentTime = DateTime.UtcNow;
-        }
-
-        public int PacketId { get; private set; }
-
-        public string LockToken { get; private set; }
-
-        public IQos2MessageDeliveryState DeliveryState { get; private set; }
-
-        public PreciseTimeSpan StartTimestamp { get; private set; }
-
-        public DateTime SentTime { get; private set; }
-
-        public void ResetSentTime()
-        {
-            this.SentTime = DateTime.UtcNow;
-        }
-    }
-
-
-    public interface IQos2MessageDeliveryState
-    {
-        DateTime LastModified { get; }
-
-        string MessageId { get; }
-    }
-
-    sealed class ReadOnlyMergeDictionary<TKey, TValue> : IDictionary<TKey, TValue>
-    {
-        readonly IDictionary<TKey, TValue> mainDictionary;
-        readonly IDictionary<TKey, TValue> secondaryDictionary;
-
-        public ReadOnlyMergeDictionary(IDictionary<TKey, TValue> mainDictionary, IDictionary<TKey, TValue> secondaryDictionary)
-        {
-            Contract.Requires(mainDictionary != null);
-            Contract.Requires(secondaryDictionary != null);
-
-            this.mainDictionary = mainDictionary;
-            this.secondaryDictionary = secondaryDictionary;
-        }
-
-        IEnumerator<KeyValuePair<TKey, TValue>> IEnumerable<KeyValuePair<TKey, TValue>>.GetEnumerator()
-        {
-            foreach (KeyValuePair<TKey, TValue> pair in this.mainDictionary)
-            {
-                yield return pair;
-            }
-
-            foreach (KeyValuePair<TKey, TValue> pair in this.secondaryDictionary)
-            {
-                if (!this.mainDictionary.ContainsKey(pair.Key))
-                {
-                    yield return pair;
-                }
-            }
-        }
-
-        IEnumerator IEnumerable.GetEnumerator()
-        {
-            return ((IEnumerable<KeyValuePair<TKey, TValue>>)this).GetEnumerator();
-        }
-
-        void ICollection<KeyValuePair<TKey, TValue>>.Add(KeyValuePair<TKey, TValue> item)
-        {
-            throw new NotSupportedException();
-        }
-
-        void ICollection<KeyValuePair<TKey, TValue>>.Clear()
-        {
-            throw new NotSupportedException();
-        }
-
-        bool ICollection<KeyValuePair<TKey, TValue>>.Contains(KeyValuePair<TKey, TValue> item)
-        {
-            throw new NotSupportedException();
-        }
-
-        void ICollection<KeyValuePair<TKey, TValue>>.CopyTo(KeyValuePair<TKey, TValue>[] array, int arrayIndex)
-        {
-            throw new NotSupportedException();
-        }
-
-        bool ICollection<KeyValuePair<TKey, TValue>>.Remove(KeyValuePair<TKey, TValue> item)
-        {
-            throw new NotSupportedException();
-        }
-
-        int ICollection<KeyValuePair<TKey, TValue>>.Count
-        {
-            get { throw new NotSupportedException(); }
-        }
-
-        bool ICollection<KeyValuePair<TKey, TValue>>.IsReadOnly
-        {
-            get { return true; }
-        }
-
-        bool IDictionary<TKey, TValue>.ContainsKey(TKey key)
-        {
-            if (this.mainDictionary.ContainsKey(key))
-            {
-                return true;
-            }
-            IDictionary<TKey, TValue> msgContext = this.secondaryDictionary;
-            return msgContext != null && msgContext.ContainsKey(key);
-        }
-
-        void IDictionary<TKey, TValue>.Add(TKey key, TValue value)
-        {
-            throw new NotSupportedException();
-        }
-
-        bool IDictionary<TKey, TValue>.Remove(TKey key)
-        {
-            throw new NotSupportedException();
-        }
-
-        public bool TryGetValue(TKey key, out TValue value)
-        {
-            if (this.mainDictionary.TryGetValue(key, out value))
-            {
-                return true;
-            }
-            return this.secondaryDictionary.TryGetValue(key, out value);
-        }
-
-        TValue IDictionary<TKey, TValue>.this[TKey key]
-        {
-            get
-            {
-                TValue value;
-                if (!this.TryGetValue(key, out value))
-                {
-                    throw new ArgumentException("Specified key was not found in the dictionary.", "key");
-                }
-                return value;
-            }
-            set { throw new NotSupportedException(); }
-        }
-
-        ICollection<TKey> IDictionary<TKey, TValue>.Keys
-        {
-            get { throw new NotSupportedException(); }
-        }
-
-        ICollection<TValue> IDictionary<TKey, TValue>.Values
-        {
-            get { throw new NotSupportedException(); }
-        }
-
-    }
-
-
-    public interface ITopicNameRouter
-    {
-        bool TryMapRouteToTopicName(MqttIotHubAdapter.RouteSourceType routeType, IDictionary<string, string> context, out string topicName);
-
-        bool TryMapTopicNameToRoute(string topicName, out RouteDestinationType routeType, IDictionary<string, string> contextOutput);
-    }
-    
-    public enum RouteDestinationType
-    {
-        Unknown,
-        Telemetry
     }
 }

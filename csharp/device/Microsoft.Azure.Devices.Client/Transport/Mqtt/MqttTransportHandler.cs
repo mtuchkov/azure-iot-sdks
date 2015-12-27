@@ -1,18 +1,20 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-namespace Microsoft.Azure.Devices.Client.Transport
+namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 {
     using System;
     using System.Collections.Generic;
     using System.Net;
+    using System.Text;
     using System.Threading.Tasks;
     using DotNetty.Codecs.Mqtt;
     using DotNetty.Handlers.Tls;
     using DotNetty.Transport.Bootstrapping;
     using DotNetty.Transport.Channels;
     using DotNetty.Transport.Channels.Sockets;
-    using Microsoft.Azure.Devices.ProtocolGateway.Mqtt;
+    using Microsoft.Azure.Devices.Client.Transport.Mqtt.Routing;
+    using Microsoft.Azure.Devices.Client.Transport.Mqtt.Store;
 
     sealed class MqttTransportHandler : TansportHandlerBase
     {
@@ -21,7 +23,8 @@ namespace Microsoft.Azure.Devices.Client.Transport
         readonly Bootstrap bootstrap;
         readonly IPAddress serverAddress;
         Func<Task> cleanupFunc;
-        
+        readonly IMqttIotHubAdapter mqttIotHubAdapter;
+
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString)
         {
             string targetHost = iotHubConnectionString.HostName;
@@ -33,15 +36,29 @@ namespace Microsoft.Azure.Devices.Client.Transport
                 
             var group = new SingleInstanceEventLoopGroup();
 
+            Settings settings = this.LoadSettings();
+
+            ISessionStatePersistenceProvider persistanceProvider = this.LoadPersistenceProvider(settings);
+
+            ITopicNameRouter topicNameRouter = new TopicNameRouter();
+
+            string clientId = iotHubConnectionString.HostName + "/" + iotHubConnectionString.DeviceId;
+            var channelHandlerAdapter = new MqttIotHubAdapter(clientId, settings, persistanceProvider, topicNameRouter);
+
+            this.mqttIotHubAdapter = channelHandlerAdapter;
+            
             this.bootstrap = new Bootstrap()
                 .Group(@group)
                 .Channel<TcpSocketChannel>()
                 .Option(ChannelOption.TcpNodelay, true)
-                .Handler(new ActionChannelInitializer<ISocketChannel>(ch => ch.Pipeline.AddLast(
-                    TlsHandler.Client(targetHost, null),
-                    MqttEncoder.Instance,
-                    new MqttDecoder(false, 256 * 1024),
-                    new MqttIotHubAdapter(ta))));
+                .Handler(new ActionChannelInitializer<ISocketChannel>(ch =>
+                {
+                    ch.Pipeline.AddLast(
+                        TlsHandler.Client(targetHost, null),
+                        MqttEncoder.Instance,
+                        new MqttDecoder(false, 256 * 1024),
+                        channelHandlerAdapter);
+                }));
 
             this.ScheduleCleanup(async () =>
             {
@@ -68,7 +85,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
                 throw new ArgumentNullException("authMethod");
             }
 
-            var connectionStringBuilder = IotHubConnectionStringBuilder.Create(hostname, authMethod);
+            IotHubConnectionStringBuilder connectionStringBuilder = IotHubConnectionStringBuilder.Create(hostname, authMethod);
             return CreateFromConnectionString(connectionStringBuilder.ToString());
         }
 
@@ -84,7 +101,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
                 throw new ArgumentNullException("connectionString");
             }
 
-            var iotHubConnectionString = IotHubConnectionString.Parse(connectionString);
+            IotHubConnectionString iotHubConnectionString = IotHubConnectionString.Parse(connectionString);
             
             return new MqttTransportHandler(iotHubConnectionString);
         }
@@ -103,51 +120,76 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
         protected override Task OnCloseAsync()
         {
-            
+            return this.cleanupFunc();
         }
 
         protected override Task OnSendEventAsync(Message message)
         {
-            
+            return this.mqttIotHubAdapter.SendEventAsync(message);
         }
 
-        protected override Task OnSendEventAsync(IEnumerable<Message> messages)
+        protected override async Task OnSendEventAsync(IEnumerable<Message> messages)
         {
-            
+            foreach (Message message in messages)
+            {
+                await this.mqttIotHubAdapter.SendEventAsync(message);
+            }
         }
 
-        internal Task SendEventAsync(IEnumerable<string> messages)
+        internal async Task SendEventAsync(IEnumerable<string> messages)
         {
-            
+            foreach (string messageString in messages)
+            {
+                var message = new Message(Encoding.UTF8.GetBytes(messageString));
+                await this.mqttIotHubAdapter.SendEventAsync(message);
+            }
         }
 
-        internal Task SendEventAsync(IEnumerable<Tuple<string, IDictionary<string, string>>> messages)
+        internal async Task SendEventAsync(IEnumerable<Tuple<string, IDictionary<string, string>>> messages)
         {
-            
+
+            foreach (Tuple<string, IDictionary<string, string>> messageData in messages)
+            {
+                var message = new Message(Encoding.UTF8.GetBytes(messageData.Item1));
+                await this.mqttIotHubAdapter.SendEventAsync(message, messageData.Item2);
+            }
         }
 
-        protected async override Task<Message> OnReceiveAsync(TimeSpan timeout)
+        protected override async Task<Message> OnReceiveAsync(TimeSpan timeout)
         {
-            
+            return await this.mqttIotHubAdapter.ReceiveAsync(timeout);
         }
 
         protected override Task OnCompleteAsync(string lockToken)
         {
-            
+            throw new NotSupportedException();
         }
 
         protected override Task OnAbandonAsync(string lockToken)
         {
-            
+            throw new NotSupportedException();
         }
 
         protected override Task OnRejectAsync(string lockToken)
         {
-            
+            throw new NotSupportedException();
         }
 
 
-        void ScheduleCleanup(Func<Task> cleanupFunc)
+        ISessionStatePersistenceProvider LoadPersistenceProvider(Settings settings)
+        {
+            //TODO: load from custom config setting section first otherwise use default impl
+            throw new NotImplementedException();
+        }
+
+        Settings LoadSettings()
+        {
+            //TODO: load from custom config setting section first otherwise use default impl
+            throw new NotImplementedException();
+        }
+
+
+        void ScheduleCleanup(Func<Task> cleanupTask)
         {
             Func<Task> currentCleanupFunc = this.cleanupFunc;
             this.cleanupFunc = async () =>
@@ -157,36 +199,8 @@ namespace Microsoft.Azure.Devices.Client.Transport
                     await currentCleanupFunc();
                 }
 
-                await cleanupFunc();
+                await cleanupTask();
             };
-        }
-    }
-
-    internal class SingleInstanceEventLoopGroup : IEventLoopGroup
-    {
-        private readonly SingleThreadEventLoop eventLoop;
-
-        public SingleInstanceEventLoopGroup()
-        {
-            this.eventLoop = new SingleThreadEventLoop();
-        }
-
-        public IEventLoop GetNext()
-        {
-            return this.eventLoop;
-        }
-
-        public Task ShutdownGracefullyAsync()
-        {
-            return this.eventLoop.ShutdownGracefullyAsync();
-        }
-
-        public Task TerminationCompletion
-        {
-            get
-            {
-                return this.eventLoop.TerminationCompletion;
-            }
         }
     }
 }

@@ -1,7 +1,7 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-namespace Microsoft.Azure.Devices.Client
+namespace Microsoft.Azure.Devices.Client.Transport
 {
     using System;
     using System.Collections.Generic;
@@ -11,14 +11,14 @@ namespace Microsoft.Azure.Devices.Client
     using System.Linq;
     using System.Net;
     using System.Net.Http;
-#if !WINDOWS_UWP
     using System.Net.Http.Formatting;
-#endif
     using System.Net.Http.Headers;
     using System.Threading;
     using System.Threading.Tasks;
     using Microsoft.Azure.Devices.Client.Exceptions;
     using Microsoft.Azure.Devices.Client.Extensions;
+#if !WINDOWS_UWP
+#endif
 
     sealed class HttpClientHelper : IHttpClientHelper
     {

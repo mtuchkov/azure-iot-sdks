@@ -7,6 +7,8 @@ namespace Microsoft.Azure.Devices.Client
     using System.Collections.Generic;
     using System.Text.RegularExpressions;
     using Microsoft.Azure.Devices.Client.Extensions;
+    using Microsoft.Azure.Devices.Client.Transport;
+    using Microsoft.Azure.Devices.Client.Transport.Mqtt;
 #if !WINDOWS_UWP
     using System.Linq;
     using System.Threading.Tasks;
