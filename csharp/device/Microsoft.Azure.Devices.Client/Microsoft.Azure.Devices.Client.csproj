@@ -58,6 +58,24 @@
     <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="DotNetty.Buffers">
+      <HintPath>..\..\..\..\..\CxCache\DotNetty.Buffers.0.2.1\lib\net45\DotNetty.Buffers.dll</HintPath>
+    </Reference>
+    <Reference Include="DotNetty.Codecs">
+      <HintPath>..\..\..\..\..\CxCache\DotNetty.Codecs.0.2.1\lib\net45\DotNetty.Codecs.dll</HintPath>
+    </Reference>
+    <Reference Include="DotNetty.Codecs.Mqtt">
+      <HintPath>..\..\..\..\..\CxCache\DotNetty.Codecs.Mqtt.0.2.1\lib\net45\DotNetty.Codecs.Mqtt.dll</HintPath>
+    </Reference>
+    <Reference Include="DotNetty.Common">
+      <HintPath>..\..\..\..\..\CxCache\DotNetty.Common.0.2.1\lib\net45\DotNetty.Common.dll</HintPath>
+    </Reference>
+    <Reference Include="DotNetty.Handlers">
+      <HintPath>..\..\..\..\..\CxCache\DotNetty.Handlers.0.2.1\lib\net45\DotNetty.Handlers.dll</HintPath>
+    </Reference>
+    <Reference Include="DotNetty.Transport">
+      <HintPath>..\..\..\..\..\CxCache\DotNetty.Transport.0.2.1\lib\net45\DotNetty.Transport.dll</HintPath>
+    </Reference>
     <Reference Include="Microsoft.Azure.Amqp, Version=1.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
       <HintPath>..\packages\Microsoft.Azure.Amqp.1.0.0-preview-003\lib\net451\Microsoft.Azure.Amqp.dll</HintPath>
       <Private>True</Private>
@@ -112,7 +130,7 @@
     <Compile Include="Common\CommonResources.cs" />
     <Compile Include="Common\CompletedAsyncResult.cs" />
     <Compile Include="Common\Data\AccessRights.cs" />
-    <Compile Include="AmqpDeviceClient.cs" />
+    <Compile Include="Transport\AmqpTransportHandler.cs" />
     <Compile Include="Common\Data\AmqpErrorMapper.cs" />
     <Compile Include="Common\BufferedInputStream.cs" />
     <Compile Include="Common\ErrorCode.cs" />
@@ -158,13 +176,19 @@
     <Compile Include="Common\Fx.cs" />
     <Compile Include="Common\FxTrace.cs" />
     <Compile Include="Common\HashCode.cs" />
+    <Compile Include="Transport\HttpClientHelper.cs" />
+    <Compile Include="Transport\Mqtt\ISessionStatePersistenceProvider.cs" />
+    <Compile Include="Transport\Mqtt\ISessionState.cs" />
+    <Compile Include="Transport\Mqtt\MqttIotHubAdapter.cs" />
+    <Compile Include="Transport\MqttTransportHandler.cs" />
+    <Compile Include="Transport\HttpTransportHandler.cs" />
     <Compile Include="HttpClientHelper.cs" />
     <Compile Include="HttpDeviceClient.cs" />
     <Compile Include="Http1TransportSettings.cs" />
     <Compile Include="IAuthenticationMethod.cs" />
     <Compile Include="AuthenticationMethodFactory.cs" />
     <Compile Include="IAuthorizationHeaderProvider.cs" />
-    <Compile Include="IHttpClientHelper.cs" />
+    <Compile Include="Transport\IHttpClientHelper.cs" />
     <Compile Include="Common\InternalBufferManager.cs" />
     <Compile Include="Common\Interop\SafeEventLogWriteHandle.cs" />
     <Compile Include="Common\Interop\UnsafeNativeMethods.cs" />
@@ -188,7 +212,10 @@
     <Compile Include="Common\ReadOnlyDictionary45.cs" />
     <Compile Include="Message.cs" />
     <Compile Include="DeviceClient.cs" />
-    <Compile Include="DeviceClientHelper.cs" />
+    <Compile Include="Transport\Mqtt\PacketAsyncProcessor.cs" />
+    <Compile Include="Transport\Mqtt\Settings.cs" />
+    <Compile Include="Transport\Mqtt\Subscription.cs" />
+    <Compile Include="Transport\TansportHandlerBase.cs" />
     <Compile Include="Common\Security\SecurityConstants.cs" />
     <Compile Include="Common\Security\SecurityHelper.cs" />
     <Compile Include="Common\Security\StringValidationHelper.cs" />

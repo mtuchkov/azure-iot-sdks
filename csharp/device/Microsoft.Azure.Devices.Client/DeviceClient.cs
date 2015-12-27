@@ -47,7 +47,12 @@ namespace Microsoft.Azure.Devices.Client
         /// <summary>
         /// Advanced Message Queuing Protocol transport over native TCP only
         /// </summary>
-        Amqp_Tcp_Only = 3
+        Amqp_Tcp_Only = 3,
+
+        /// <summary>
+        /// Message Queuing Telemetry Transport.
+        /// </summary>
+        Mqtt = 4
     }
 
     /// <summary>
@@ -173,10 +178,16 @@ namespace Microsoft.Azure.Devices.Client
                     throw new NotImplementedException("Amqp protocol is not supported");
 #else
                     return CreateFromConnectionString(connectionString, new ITransportSettings[]
-                    {
+            {
                         new AmqpTransportSettings(TransportType.Amqp_Tcp_Only),
                         new AmqpTransportSettings(TransportType.Amqp_WebSocket_Only)
                     });
+#endif
+                case TransportType.Mqtt:
+#if WINDOWS_UWP
+                    throw new NotImplementedException("Amqp protocol is not supported");
+#else
+                    return CreateFromConnectionString(connectionString, new ITransportSettings[] { new MqttTransportSettings(transportType) });
 #endif
                 case TransportType.Amqp_WebSocket_Only:
                 case TransportType.Amqp_Tcp_Only:
@@ -328,7 +339,7 @@ namespace Microsoft.Azure.Devices.Client
 #endif
                 return this.impl.CloseAsync().AsTaskOrAsyncOp();
 #if !WINDOWS_UWP
-            }
+        }
 
             return TaskHelpers.CompletedTask;
 #endif
@@ -408,7 +419,7 @@ namespace Microsoft.Azure.Devices.Client
 #endif
                 return this.impl.CompleteAsync(lockToken).AsTaskOrAsyncOp();
 #if !WINDOWS_UWP
-            }
+        }
 #endif
         }
 
@@ -427,7 +438,7 @@ namespace Microsoft.Azure.Devices.Client
 
                     await this.impl.CompleteAsync(message).AsTaskOrAsyncOp();
                 });
-            }
+        }
             else
             {
 #endif
@@ -455,7 +466,7 @@ namespace Microsoft.Azure.Devices.Client
 
                     await this.impl.AbandonAsync(lockToken).AsTaskOrAsyncOp();
                 });
-            }
+        }
             else
             {
 #endif
@@ -480,7 +491,7 @@ namespace Microsoft.Azure.Devices.Client
 
                     await this.impl.AbandonAsync(message).AsTaskOrAsyncOp();
                 });
-            }
+        }
             else
             {
 #endif
@@ -508,7 +519,7 @@ namespace Microsoft.Azure.Devices.Client
 
                     await this.impl.RejectAsync(lockToken).AsTaskOrAsyncOp();
                 });
-            }
+        }
             else
             {
 #endif
@@ -533,7 +544,7 @@ namespace Microsoft.Azure.Devices.Client
 
                     await this.impl.RejectAsync(message).AsTaskOrAsyncOp();
                 });
-            }
+        }
             else
             {
 #endif
