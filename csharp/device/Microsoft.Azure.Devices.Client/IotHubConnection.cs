@@ -188,7 +188,7 @@ namespace Microsoft.Azure.Devices.Client
             var tlsTransportSettings = this.CreateTlsTransportSettings();
 
             var amqpTransportInitiator = new AmqpTransportInitiator(amqpSettings, tlsTransportSettings);
-            TransportBase transport;
+            TransportBase transport = null;
             if (this.useWebSocketOnly)
             {
                 // Try only Amqp transport over WebSocket
@@ -208,15 +208,16 @@ namespace Microsoft.Azure.Devices.Client
                     }
 
                     // Amqp transport over TCP failed. Retry Amqp transport over WebSocket
-                    if (timeoutHelper.RemainingTime() != TimeSpan.Zero)
-                    {
-                        transport = await this.CreateClientWebSocketTransport(timeoutHelper.RemainingTime());
-                    }
-                    else
+                    if (timeoutHelper.RemainingTime() == TimeSpan.Zero)
                     {
                         throw;
                     }
                 }
+            }
+
+            if (transport == null)
+            {
+                transport = await this.CreateClientWebSocketTransport(timeoutHelper.RemainingTime());
             }
 
             AmqpConnectionSettings amqpConnectionSettings = new AmqpConnectionSettings()

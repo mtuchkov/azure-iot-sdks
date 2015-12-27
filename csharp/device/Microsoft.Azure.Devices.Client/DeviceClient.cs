@@ -7,6 +7,8 @@ namespace Microsoft.Azure.Devices.Client
     using System.Collections.Generic;
     using System.Text.RegularExpressions;
     using Microsoft.Azure.Devices.Client.Extensions;
+    using Microsoft.Azure.Devices.Client.Transport;
+    using Microsoft.Azure.Devices.Client.Transport.Mqtt;
 
     // C# using aliases cannot name an unbound generic type declaration without supplying type arguments
     // Therefore, define a separate alias for each type argument
@@ -36,7 +38,7 @@ namespace Microsoft.Azure.Devices.Client
         /// <summary>
         /// Advanced Message Queuing Protocol transport over WebSocket.
         /// </summary>
-        Amqp_WebSocket
+        Amqp_WebSocket,
 
         /// <summary>
         /// Message Queuing Telemetry Transport.
@@ -151,12 +153,12 @@ namespace Microsoft.Azure.Devices.Client
 #if WINDOWS_UWP
                     throw new NotImplementedException();
 #else
-                    return new DeviceClient(new DeviceClientAmqpTransportHandler(iotHubConnectionString, (transportType == TransportType.Amqp_WebSocket) ? true : false));
+                    return new DeviceClient(new AmqpTransportHandler(iotHubConnectionString, (transportType == TransportType.Amqp_WebSocket) ? true : false));
 #endif
                 case TransportType.Http1:
-                    return new DeviceClient(new DeviceClientHttpTransportHandler(iotHubConnectionString));
+                    return new DeviceClient(new HttpTransportHandler(iotHubConnectionString));
                 case TransportType.Mqtt:
-                    return new DeviceClient(new MqttDeviceClient(iotHubConnectionString));
+                    return new DeviceClient(new MqttTransportHandler(iotHubConnectionString));
                 default:
                     throw new InvalidOperationException("Unsupported Transport Type {0}".FormatInvariant(transportType));
             }

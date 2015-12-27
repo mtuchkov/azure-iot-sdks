@@ -1,12 +1,12 @@
 // Copyright (c) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-namespace Microsoft.Azure.Devices.ProtocolGateway.Mqtt
+namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 {
     using System;
     using DotNetty.Codecs.Mqtt.Packets;
 
-    internal class Settings
+    class Settings
     {
         public bool DeviceReceiveAckCanTimeout { get; set; }
 

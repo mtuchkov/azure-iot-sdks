@@ -1,26 +1,24 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-namespace Microsoft.Azure.Devices.Client
+namespace Microsoft.Azure.Devices.Client.Transport
 {
+    // C# using aliases cannot name an unbound generic type declaration without supplying type arguments
+    // Therefore, define a separate alias for each type argument
     using System;
     using System.Collections.Generic;
     using System.Threading.Tasks;
-
-    // C# using aliases cannot name an unbound generic type declaration without supplying type arguments
-    // Therefore, define a separate alias for each type argument
 #if WINDOWS_UWP
     using AsyncTask = Windows.Foundation.IAsyncAction;
     using AsyncTaskOfMessage = Windows.Foundation.IAsyncOperation<Message>;
 #else
-    using AsyncTask = System.Threading.Tasks.Task;
-    using AsyncTaskOfMessage = System.Threading.Tasks.Task<Message>;
+
 #endif
 
     /// <summary>
     /// Contains the implementation of methods that a device can use to send messages to and receive from the service.
     /// </summary>
-    internal abstract class TansportHandlerBase
+    abstract class TansportHandlerBase
     {
         bool openCalled;
         bool closeCalled;

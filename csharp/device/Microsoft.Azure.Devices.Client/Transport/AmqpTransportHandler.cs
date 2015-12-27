@@ -1,7 +1,7 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-namespace Microsoft.Azure.Devices.Client
+namespace Microsoft.Azure.Devices.Client.Transport
 {
     using System;
     using System.Collections.Generic;
@@ -10,31 +10,31 @@ namespace Microsoft.Azure.Devices.Client
     using System.Web;
     using Microsoft.Azure.Amqp;
     using Microsoft.Azure.Amqp.Framing;
-    using Microsoft.Azure.Devices.Client.Extensions;
     using Microsoft.Azure.Devices.Client.Exceptions;
+    using Microsoft.Azure.Devices.Client.Extensions;
 
     sealed class AmqpTransportHandler : TansportHandlerBase
     {
         const uint DefaultPrefetchCount = 50;
         static readonly IotHubConnectionCache connectionCache = new IotHubConnectionCache(AccessRights.DeviceConnect);
         readonly string deviceId;
-        readonly FaultTolerantAmqpObject<SendingAmqpLink> faultTolerantEventSendingLink;
-        readonly FaultTolerantAmqpObject<ReceivingAmqpLink> faultTolerantDeviceBoundReceivingLink;
+        readonly Client.FaultTolerantAmqpObject<SendingAmqpLink> faultTolerantEventSendingLink;
+        readonly Client.FaultTolerantAmqpObject<ReceivingAmqpLink> faultTolerantDeviceBoundReceivingLink;
         readonly IotHubConnection IotHubConnection;
         readonly TimeSpan openTimeout;
         readonly TimeSpan operationTimeout;
 
         int eventsDeliveryTag;
 
-        public DeviceClientAmqpTransportHandler(IotHubConnectionString connectionString, bool useWebSocketOnly)
+        public AmqpTransportHandler(IotHubConnectionString connectionString, bool useWebSocketOnly)
         {
             this.IotHubConnection = connectionCache.GetConnection(connectionString, useWebSocketOnly);
             this.deviceId = connectionString.DeviceId;
             this.openTimeout = IotHubConnection.DefaultOpenTimeout;
             this.operationTimeout = IotHubConnection.DefaultOperationTimeout;
             this.DefaultReceiveTimeout = IotHubConnection.DefaultOperationTimeout;
-            this.faultTolerantEventSendingLink = new FaultTolerantAmqpObject<SendingAmqpLink>(this.CreateEventSendingLinkAsync, this.IotHubConnection.CloseLink);
-            this.faultTolerantDeviceBoundReceivingLink = new FaultTolerantAmqpObject<ReceivingAmqpLink>(this.CreateDeviceBoundReceivingLinkAsync, this.IotHubConnection.CloseLink);
+            this.faultTolerantEventSendingLink = new Client.FaultTolerantAmqpObject<SendingAmqpLink>(this.CreateEventSendingLinkAsync, this.IotHubConnection.CloseLink);
+            this.faultTolerantDeviceBoundReceivingLink = new Client.FaultTolerantAmqpObject<ReceivingAmqpLink>(this.CreateDeviceBoundReceivingLinkAsync, this.IotHubConnection.CloseLink);
         }
 
         /// <summary>
@@ -43,7 +43,7 @@ namespace Microsoft.Azure.Devices.Client
         /// <param name="hostname">The fully-qualified DNS hostname of IoT Hub</param>
         /// <param name="authMethod">The authentication method that is used</param>
         /// <returns>DeviceClient</returns>
-        public static DeviceClientAmqpTransportHandler Create(string hostname, IAuthenticationMethod authMethod)
+        public static AmqpTransportHandler Create(string hostname, IAuthenticationMethod authMethod)
         {
             if (hostname == null)
             {
@@ -64,7 +64,7 @@ namespace Microsoft.Azure.Devices.Client
         /// </summary>
         /// <param name="connectionString">Connection string for the IoT hub</param>
         /// <returns>DeviceClient</returns>
-        public static DeviceClientAmqpTransportHandler CreateFromConnectionString(string connectionString)
+        public static AmqpTransportHandler CreateFromConnectionString(string connectionString)
         {
             if (connectionString == null)
             {
@@ -72,11 +72,11 @@ namespace Microsoft.Azure.Devices.Client
             }
 
             var iotHubConnectionString = IotHubConnectionString.Parse(connectionString);
-            return new DeviceClientAmqpTransportHandler(iotHubConnectionString, false);
+            return new AmqpTransportHandler(iotHubConnectionString, false);
         }
 
         // This Finalizer gets cancelled when/if the user calls CloseAsync.
-        ~DeviceClientAmqpTransportHandler()
+        ~AmqpTransportHandler()
         {
             // If the user failed to call CloseAsync make sure the connection's reference count gets updated.
             this.CloseAsync().Fork();
