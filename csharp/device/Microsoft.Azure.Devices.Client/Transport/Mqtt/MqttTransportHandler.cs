@@ -42,8 +42,14 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             ITopicNameRouter topicNameRouter = new TopicNameRouter();
 
-            string clientId = iotHubConnectionString.HostName + "/" + iotHubConnectionString.DeviceId;
-            var channelHandlerAdapter = new MqttIotHubAdapter(clientId, settings, persistanceProvider, topicNameRouter);
+            var channelHandlerAdapter = 
+                new MqttIotHubAdapter(
+                    iotHubConnectionString.DeviceId, 
+                    iotHubConnectionString.HostName, 
+                    iotHubConnectionString.GetPassword(), 
+                    settings, 
+                    persistanceProvider, 
+                    topicNameRouter);
 
             this.mqttIotHubAdapter = channelHandlerAdapter;
             
