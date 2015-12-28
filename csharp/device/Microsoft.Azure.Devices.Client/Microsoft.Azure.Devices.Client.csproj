@@ -111,6 +111,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Common\Exceptions\IotHubClientException.cs" />
     <Compile Include="AmqpClientHelper.cs" />
     <Compile Include="AmqpTransportSettings.cs" />
     <Compile Include="Common\TaskConstants.cs" />
@@ -181,6 +182,7 @@
     <Compile Include="Transport\HttpClientHelper.cs" />
     <Compile Include="Transport\Mqtt\IMqttIotHubAdapter.cs" />
     <Compile Include="Transport\Mqtt\ITopicNameRouter.cs" />
+    <Compile Include="Transport\Mqtt\IWillMessageProvider.cs" />
     <Compile Include="Transport\Mqtt\ReadOnlyByteBufferStream.cs" />
     <Compile Include="Transport\Mqtt\RouteDestinationType.cs" />
     <Compile Include="Transport\Mqtt\Routing\InboundRouteDefinition.cs" />
@@ -231,6 +233,7 @@
     <Compile Include="Transport\Mqtt\SingleInstanceEventLoopGroup.cs" />
     <Compile Include="Transport\Mqtt\TaskExtensions.cs" />
     <Compile Include="Transport\Mqtt\Util.cs" />
+    <Compile Include="Transport\Mqtt\WillMessageProvider.cs" />
     <Compile Include="Transport\TansportHandlerBase.cs" />
     <Compile Include="Common\Security\SecurityConstants.cs" />
     <Compile Include="Common\Security\SecurityHelper.cs" />

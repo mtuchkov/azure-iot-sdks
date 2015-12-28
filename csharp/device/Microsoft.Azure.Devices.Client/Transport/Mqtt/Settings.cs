@@ -31,5 +31,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         public int MaxPendingInboundMessages { get; set; }
 
         public TimeSpan? ConnectArrivalTimeout { get; set; }
+
+        public bool CleanSession { get; set; }
+
+        public int KeepAliveInSeconds { get; set; }
+
+        public bool HasWill { get; set; }
     }
 }

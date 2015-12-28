@@ -8,7 +8,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using System.Diagnostics.Contracts;
     using System.IO;
     using System.Net;
+    using System.Text;
+    using System.Threading;
     using System.Threading.Tasks;
+    using DotNetty.Buffers;
     using DotNetty.Codecs.Mqtt.Packets;
     using DotNetty.Common;
     using DotNetty.Common.Utilities;
@@ -24,86 +27,135 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         const string SubjectPropertyName = "Subject";
         const string DeviceIdParam = "deviceId";
 
-        static readonly Action<object> CheckConnectTimeoutCallback = CheckConnectionTimeout;
-        static readonly Action<object> CheckKeepAliveCallback = CheckKeepAlive;
+        static readonly Action<object> PingServerCallback = PingServer;
+        static readonly Action<object> CheckConackTimeoutCallback = CheckConnectionTimeout;
         static readonly Action<Task, object> ShutdownOnWriteFaultAction = (task, ctx) => ShutdownOnError((IChannelHandlerContext)ctx, "WriteAndFlushAsync", task.Exception);
         static readonly Action<Task, object> ShutdownOnPublishFaultAction = (task, ctx) => ShutdownOnError((IChannelHandlerContext)ctx, "<- PUBLISH", task.Exception);
         static readonly Action<Task> ShutdownOnPublishToServerFaultAction = CreateScopedFaultAction("-> PUBLISH");
         static readonly Action<Task> ShutdownOnPubAckFaultAction = CreateScopedFaultAction("-> PUBACK");
 
         readonly Settings settings;
-        StateFlags stateFlags;
-        DateTime lastClientActivityTime;
+        readonly ITopicNameRouter topicNameRouter;
+        readonly IWillMessageProvider willMessageProvider;
+        Dictionary<string, string> sessionContext;
         ISessionState sessionState;
+        
+        readonly string deviceId;
+        readonly string iotHubHostName;
+        readonly string password;
+        readonly TimeSpan? keepAliveTimeout;
+        readonly TimeSpan pingRequestTimeout;
+        readonly QualityOfService maxSupportedQos;
+        DateTime lastClientActivityTime;
+        
         readonly PacketAsyncProcessor<PublishPacket> publishProcessor;
         readonly RequestAckPairProcessor<AckPendingMessageState, PublishPacket> publishPubAckProcessor;
-        readonly ITopicNameRouter topicNameRouter;
-        Dictionary<string, string> sessionContext;
-        readonly QualityOfService maxSupportedQosToClient;
-        TimeSpan keepAliveTimeout;
         readonly ISessionStatePersistenceProvider sessionStateManager;
         Queue<Packet> connectWithSubscribeQueue;
         Queue<Packet> subscriptionChangeQueue;
-        readonly string clientId;
+        
+        StateFlags stateFlags;
+
+        Queue<Packet> SubscriptionChangeQueue { get { return this.subscriptionChangeQueue ?? (this.subscriptionChangeQueue = new Queue<Packet>(4)); } }
+        Queue<Packet> ConnectPendingQueue { get { return this.connectWithSubscribeQueue ?? (this.connectWithSubscribeQueue = new Queue<Packet>(4)); } }
+        int InboundBacklogSize { get { return this.publishProcessor.BacklogSize + this.publishPubAckProcessor.BacklogSize; } }
+        int MessagePendingAckCount { get { return this.publishPubAckProcessor.RequestPendingAckCount; } }
 
         public MqttIotHubAdapter(
-            string clientId,
+            string deviceId,
+            string iotHubHostName,
+            string password,
             Settings settings, 
             ISessionStatePersistenceProvider sessionStateManager,
-            ITopicNameRouter topicNameRouter)
+            ITopicNameRouter topicNameRouter,
+            IWillMessageProvider willMessageProvider)
         {
+
+            Contract.Requires(deviceId != null);
+            Contract.Requires(iotHubHostName != null);
+            Contract.Requires(password != null);
             Contract.Requires(settings != null);
             Contract.Requires(sessionStateManager != null);
             Contract.Requires(topicNameRouter != null);
+            if (settings.HasWill)
+            {
+                Contract.Requires(willMessageProvider != null);
+            }
 
-            this.maxSupportedQosToClient = QualityOfService.AtLeastOnce;
+            this.deviceId = deviceId;
+            this.iotHubHostName = iotHubHostName;
+            this.password = password;
             this.settings = settings;
             this.sessionStateManager = sessionStateManager;
             this.topicNameRouter = topicNameRouter;
-            this.clientId = clientId;
+            this.willMessageProvider = willMessageProvider;
+            this.maxSupportedQos = QualityOfService.AtLeastOnce;
+            this.keepAliveTimeout = this.settings.KeepAliveInSeconds > 0 ? TimeSpan.FromSeconds(this.settings.KeepAliveInSeconds) : (TimeSpan?)null;
+            this.pingRequestTimeout = this.settings.KeepAliveInSeconds > 0 ? TimeSpan.FromSeconds(this.settings.KeepAliveInSeconds / 2d) : TimeSpan.MaxValue;
 
             this.publishProcessor = new PacketAsyncProcessor<PublishPacket>(this.PublishToServerAsync);
             this.publishProcessor.Completion.OnFault(ShutdownOnPublishToServerFaultAction);
-
-            TimeSpan? ackTimeout = this.settings.DeviceReceiveAckCanTimeout ? this.settings.DeviceReceiveAckTimeout : (TimeSpan?)null;
+            
+            TimeSpan? ackTimeout = this.settings.DeviceReceiveAckCanTimeout ? this.settings.DeviceReceiveAckTimeout : null;
             this.publishPubAckProcessor = new RequestAckPairProcessor<AckPendingMessageState, PublishPacket>(this.AcknowledgePublishAsync, this.RetransmitNextPublish, ackTimeout);
             this.publishPubAckProcessor.Completion.OnFault(ShutdownOnPubAckFaultAction);
-        }
-
-        Queue<Packet> SubscriptionChangeQueue
-        {
-            get { return this.subscriptionChangeQueue ?? (this.subscriptionChangeQueue = new Queue<Packet>(4)); }
-        }
-
-        Queue<Packet> ConnectPendingQueue
-        {
-            get { return this.connectWithSubscribeQueue ?? (this.connectWithSubscribeQueue = new Queue<Packet>(4)); }
-        }
-        
-        int InboundBacklogSize
-        {
-            get
-            {
-                return this.publishProcessor.BacklogSize + this.publishPubAckProcessor.BacklogSize;
-            }
-        }
-
-        int MessagePendingAckCount
-        {
-            get { return this.publishPubAckProcessor.RequestPendingAckCount; }
         }
 
         #region IChannelHandler overrides
 
         public override void ChannelActive(IChannelHandlerContext context)
         {
-            this.stateFlags = StateFlags.WaitingForConnect;
+            this.stateFlags = StateFlags.NotConnected;
+
+            context.Channel.EventLoop.ScheduleAsync(this.ConnectCallback, context, TimeSpan.MaxValue);
+
+            base.ChannelActive(context);
+        }
+
+        void ConnectCallback(object state)
+        {
+            var context = (IChannelHandlerContext)state;
+            var connectPacket = new ConnectPacket
+            {
+                ClientId = this.deviceId,
+                HasUsername = true,
+                Username = this.iotHubHostName + "/" + this.deviceId,
+                HasPassword = true,
+                Password = this.password,
+                KeepAliveInSeconds = this.settings.KeepAliveInSeconds,
+                CleanSession = this.settings.CleanSession,
+                HasWill = this.settings.HasWill
+            };
+            if (connectPacket.HasWill)
+            {
+                connectPacket.WillMessage = Unpooled.CopiedBuffer(Encoding.UTF8.GetBytes(this.willMessageProvider.Message));
+                connectPacket.WillQualityOfService = this.willMessageProvider.QoS;
+                connectPacket.WillRetain = false;
+                string willtopicName;
+                if (!this.topicNameRouter.TryMapRouteToTopicName(RouteSourceType.Notification, this.willMessageProvider.Properties, out willtopicName))
+                {
+                    this.Shutdown(context, true);
+                    context.FireExceptionCaught(new IotHubClientException("Cannot create will topic. Please check topic name router settings and will message properties."));
+                }
+                connectPacket.WillTopicName = willtopicName;
+            }
+            this.stateFlags = StateFlags.Connecting;
+
+            //Used to send PINGREQ in case of long time of inactivity
+
+            Util.WriteMessageAsync(context, connectPacket).OnFault(ShutdownOnWriteFaultAction, context);
+            
+            if (this.keepAliveTimeout.HasValue)
+            {
+                this.lastClientActivityTime = DateTime.UtcNow;
+                context.Channel.EventLoop.ScheduleAsync(PingServerCallback, context, this.pingRequestTimeout);
+            }
+
             TimeSpan? timeout = this.settings.ConnectArrivalTimeout;
             if (timeout.HasValue)
             {
-                context.Channel.EventLoop.ScheduleAsync(CheckConnectTimeoutCallback, context, timeout.Value);
+                context.Channel.EventLoop.ScheduleAsync(CheckConackTimeoutCallback, context, timeout.Value);
             }
-            base.ChannelActive(context);
 
             context.Read();
         }
@@ -124,7 +176,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
             else
             {
-                if (this.IsInState(StateFlags.ProcessingConnect))
+                if (this.IsInState(StateFlags.Connecting))
                 {
                     this.ConnectPendingQueue.Enqueue(packet);
                 }
@@ -174,8 +226,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             switch (packet.PacketType)
             {
-                case PacketType.CONNECT:
-                    this.Connect(context, (ConnectPacket)packet);
+                case PacketType.CONNACK:
+                    this.AcknowledgeConnection(context, (ConnAckPacket)packet);
                     break;
                 case PacketType.PUBLISH:
                     this.publishProcessor.Post(context, (PublishPacket)packet);
@@ -228,7 +280,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                         switch (packet.PacketType)
                         {
                             case PacketType.SUBSCRIBE:
-                                acks.Add(Util.AddSubscriptions(newState, (SubscribePacket)packet, this.maxSupportedQosToClient));
+                                acks.Add(Util.AddSubscriptions(newState, (SubscribePacket)packet, this.maxSupportedQos));
                                 break;
                             case PacketType.UNSUBSCRIBE:
                                 acks.Add(Util.RemoveSubscriptions(newState, (UnsubscribePacket)packet));
@@ -242,7 +294,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                     if (!this.sessionState.IsTransient)
                     {
                         // save updated session state, make it current once successfully set
-                        await this.sessionStateManager.SetAsync(this.clientId, newState);
+                        await this.sessionStateManager.SetAsync(this.deviceId, newState);
                     }
 
                     this.sessionState = newState;
@@ -673,9 +725,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 {
                     found = true;
                     qos = subscription.QualityOfService;
-                    if (qos >= this.maxSupportedQosToClient)
+                    if (qos >= this.maxSupportedQos)
                     {
-                        qos = this.maxSupportedQosToClient;
+                        qos = this.maxSupportedQos;
                         break;
                     }
                 }
@@ -700,28 +752,28 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         /// </summary>
         /// <param name="context"><see cref="IChannelHandlerContext" /> instance.</param>
         /// <param name="packet">CONNECT packet.</param>
-        async void Connect(IChannelHandlerContext context, ConnectPacket packet)
+        async void AcknowledgeConnection(IChannelHandlerContext context, ConnAckPacket packet)
         {
             bool connAckSent = false;
 
             Exception exception = null;
             try
             {
-                if (!this.IsInState(StateFlags.WaitingForConnect))
+                if (!this.IsInState(StateFlags.Connecting))
                 {
                     ShutdownOnError(context, "CONNECT has been received in current session already. Only one CONNECT is expected per session.");
                     return;
                 }
 
-                this.stateFlags = StateFlags.ProcessingConnect;
+                this.stateFlags = StateFlags.Connected;
                 
-                bool sessionPresent = await this.EstablishSessionStateAsync(this.clientId, packet.CleanSession);
+                bool sessionPresent = await this.EstablishSessionStateAsync(this.deviceId, this.settings.CleanSession);
 
                 this.keepAliveTimeout = this.DeriveKeepAliveTimeout(packet);
 
                 this.sessionContext = new Dictionary<string, string>
                 {
-                    { DeviceIdParam, this.clientId }
+                    { DeviceIdParam, this.deviceId }
                 };
 
                 this.StartReceiving(context);
@@ -817,7 +869,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             if (this.keepAliveTimeout > TimeSpan.Zero)
             {
-                CheckKeepAlive(context);
+                PingServer(context);
             }
 
             this.stateFlags = StateFlags.Connected;
@@ -837,24 +889,23 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             var context = (IChannelHandlerContext)state;
             var handler = (MqttIotHubAdapter)context.Handler;
-            if (handler.IsInState(StateFlags.WaitingForConnect))
+            if (handler.IsInState(StateFlags.Connecting))
             {
-                ShutdownOnError(context, "Connection timed out on waiting for CONNECT packet from client.");
+                ShutdownOnError(context, "Connection timed out on waiting for CONACK packet from server.");
             }
         }
 
-        static void CheckKeepAlive(object ctx)
+        static void PingServer(object ctx)
         {
             var context = (IChannelHandlerContext)ctx;
             var self = (MqttIotHubAdapter)context.Handler;
-            TimeSpan elapsedSinceLastActive = DateTime.UtcNow - self.lastClientActivityTime;
-            if (elapsedSinceLastActive > self.keepAliveTimeout)
+            TimeSpan remainingTime = DateTime.UtcNow - self.lastClientActivityTime - self.pingRequestTimeout;
+            if (remainingTime.TotalSeconds > 0)
             {
-                ShutdownOnError(context, "Keep Alive timed out.");
-                return;
+                Util.WriteMessageAsync(context, PingReqPacket.Instance).OnFault(f => context.FireExceptionCaught(f.Exception));
             }
 
-            context.Channel.EventLoop.ScheduleAsync(CheckKeepAliveCallback, context, self.keepAliveTimeout - elapsedSinceLastActive);
+            context.Channel.EventLoop.ScheduleAsync(PingServerCallback, context, self.pingRequestTimeout);
         }
 
         static void ShutdownOnError(IChannelHandlerContext context, string scope, Exception exception)
@@ -919,7 +970,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         async void CloseIotHubConnection()
         {
-            if (this.IsInState(StateFlags.WaitingForConnect))
+            if (this.IsInState(StateFlags.NotConnected))
             {
                 // closure happened before IoT Hub connection was established or it was initiated due to disconnect
                 return;
@@ -967,6 +1018,16 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             return (this.stateFlags & stateFlagsToCheck) == stateFlagsToCheck;
         }
 
+        bool IsInStates(StateFlags stateFlagsToCheck)
+        {
+            return (this.stateFlags & stateFlagsToCheck) > 0;
+        }
+
+        bool IsStateCompleted(StateFlags stateFlagsToCheck)
+        {
+            return this.stateFlags > stateFlagsToCheck;
+        }
+
         void ResetState(StateFlags stateFlagsToReset)
         {
             this.stateFlags &= ~stateFlagsToReset;
@@ -977,8 +1038,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         [Flags]
         enum StateFlags
         {
-            WaitingForConnect = 1,
-            ProcessingConnect = 1 << 1,
+            NotConnected = 1,
+            Connecting = 1 << 1,
             Connected = 1 << 2,
             ChangingSubscriptions = 1 << 3,
             Receiving = 1 << 4,
