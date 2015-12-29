@@ -23,7 +23,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly Bootstrap bootstrap;
         readonly IPAddress serverAddress;
         Func<Task> cleanupFunc;
-        readonly IMqttIotHubAdapter mqttIotHubAdapter;
+        DeviceClientAdapter deviceClientAdapter;
 
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString)
         {
@@ -36,23 +36,16 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 
             var group = new SingleInstanceEventLoopGroup();
 
-            Settings settings = this.LoadSettings();
+            var settings = new Settings(this.LoadImplementation<ISettingsProvider>());
 
-            ISessionStatePersistenceProvider persistanceProvider = this.LoadPersistenceProvider(settings);
+            var persistanceProvider = this.LoadImplementation<ISessionStatePersistenceProvider>();
+
+            var willMessageProvider = this.LoadImplementation<IWillMessageProvider>();
+
+            this.deviceClientAdapter = new DeviceClientAdapter();
 
             ITopicNameRouter topicNameRouter = new TopicNameRouter();
 
-            var channelHandlerAdapter = 
-                new MqttIotHubAdapter(
-                    iotHubConnectionString.DeviceId, 
-                    iotHubConnectionString.HostName, 
-                    iotHubConnectionString.GetPassword(), 
-                    settings, 
-                    persistanceProvider, 
-                    topicNameRouter);
-
-            this.mqttIotHubAdapter = channelHandlerAdapter;
-            
             this.bootstrap = new Bootstrap()
                 .Group(@group)
                 .Channel<TcpSocketChannel>()
@@ -63,7 +56,15 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                         TlsHandler.Client(targetHost, null),
                         MqttEncoder.Instance,
                         new MqttDecoder(false, 256 * 1024),
-                        channelHandlerAdapter);
+                        new MqttIotHubAdapter(
+                            iotHubConnectionString.DeviceId, 
+                            iotHubConnectionString.HostName, 
+                            iotHubConnectionString.GetPassword(), 
+                            settings, 
+                            persistanceProvider, 
+                            topicNameRouter,
+                            willMessageProvider,
+                            this.deviceClientAdapter));
                 }));
 
             this.ScheduleCleanup(async () =>
@@ -71,6 +72,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 await group.ShutdownGracefullyAsync();
             });
 
+        }
+
+        T LoadImplementation<T>()
+        {
+            throw new NotImplementedException();
         }
 
         /// <summary>
@@ -122,23 +128,26 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 await clientChannel.CloseAsync();
             });
+
+            return this.deviceClientAdapter.ConnectAsync();
         }
 
-        protected override Task OnCloseAsync()
+        protected override async Task OnCloseAsync()
         {
-            return this.cleanupFunc();
+            await this.cleanupFunc();
+            return this.deviceClientAdapter.DisconnectAsync();
         }
 
         protected override Task OnSendEventAsync(Message message)
         {
-            return this.mqttIotHubAdapter.SendEventAsync(message);
+            return this.deviceClientAdapter.SendEventAsync(message);
         }
 
         protected override async Task OnSendEventAsync(IEnumerable<Message> messages)
         {
             foreach (Message message in messages)
             {
-                await this.mqttIotHubAdapter.SendEventAsync(message);
+                await this.deviceClientAdapter.SendEventAsync(message);
             }
         }
 
@@ -147,7 +156,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             foreach (string messageString in messages)
             {
                 var message = new Message(Encoding.UTF8.GetBytes(messageString));
-                await this.mqttIotHubAdapter.SendEventAsync(message);
+                await this.deviceClientAdapter.SendEventAsync(message);
             }
         }
 
@@ -157,13 +166,13 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             foreach (Tuple<string, IDictionary<string, string>> messageData in messages)
             {
                 var message = new Message(Encoding.UTF8.GetBytes(messageData.Item1));
-                await this.mqttIotHubAdapter.SendEventAsync(message, messageData.Item2);
+                await this.deviceClientAdapter.SendEventAsync(message, messageData.Item2);
             }
         }
 
         protected override async Task<Message> OnReceiveAsync(TimeSpan timeout)
         {
-            return await this.mqttIotHubAdapter.ReceiveAsync(timeout);
+            return await this.deviceClientAdapter.ReceiveAsync(timeout);
         }
 
         protected override Task OnCompleteAsync(string lockToken)
@@ -179,19 +188,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         protected override Task OnRejectAsync(string lockToken)
         {
             throw new NotSupportedException();
-        }
-
-
-        ISessionStatePersistenceProvider LoadPersistenceProvider(Settings settings)
-        {
-            //TODO: load from custom config setting section first otherwise use default impl
-            throw new NotImplementedException();
-        }
-
-        Settings LoadSettings()
-        {
-            //TODO: load from custom config setting section first otherwise use default impl
-            throw new NotImplementedException();
         }
 
 

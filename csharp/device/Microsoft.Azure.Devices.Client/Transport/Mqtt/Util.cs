@@ -90,17 +90,17 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                     qos = (QualityOfService)qosAsInt;
                     if (qos > QualityOfService.ExactlyOnce)
                     {
-                        qos = config.DefaultPublishToClientQoS;
+                        qos = config.DefaultPublishToServerQoS;
                     }
                 }
                 else
                 {
-                    qos = config.DefaultPublishToClientQoS;
+                    qos = config.DefaultPublishToServerQoS;
                 }
             }
             else
             {
-                qos = config.DefaultPublishToClientQoS;
+                qos = config.DefaultPublishToServerQoS;
             }
             return qos;
         }
