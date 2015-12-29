@@ -37,7 +37,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly Settings settings;
         readonly ITopicNameRouter topicNameRouter;
         readonly IWillMessageProvider willMessageProvider;
-        Dictionary<string, string> sessionContext;
+        readonly ISessionContextProvider sessionContextProvider;
         ISessionState sessionState;
         
         readonly string deviceId;
@@ -67,6 +67,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             string password,
             Settings settings, 
             ISessionStatePersistenceProvider sessionStateManager,
+            ISessionContextProvider sessionContextProvider,
             ITopicNameRouter topicNameRouter,
             IWillMessageProvider willMessageProvider)
         {
@@ -87,6 +88,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.password = password;
             this.settings = settings;
             this.sessionStateManager = sessionStateManager;
+            this.sessionContextProvider = sessionContextProvider;
             this.topicNameRouter = topicNameRouter;
             this.willMessageProvider = willMessageProvider;
             this.maxSupportedQos = QualityOfService.AtLeastOnce;
@@ -157,6 +159,24 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 context.Channel.EventLoop.ScheduleAsync(CheckConackTimeoutCallback, context, timeout.Value);
             }
 
+            string topicName;
+            if (this.topicNameRouter.TryMapRouteToTopicName(RouteSourceType.Notification, this.sessionContextProvider.Properties, out topicName))
+            {
+
+                var subscribePacket = new SubscribePacket
+                {
+                    PacketId = 1,
+                    Requests = new[]
+                    {
+                        new SubscriptionRequest(topicName, this.settings.DefaultPublishQoS), 
+                    }
+                };
+                this.stateFlags = StateFlags.Connecting;
+
+                //Used to send PINGREQ in case of long time of inactivity
+
+                Util.WriteMessageAsync(context, subscribePacket).OnFault(ShutdownOnWriteFaultAction, context);
+            }
             context.Read();
         }
 

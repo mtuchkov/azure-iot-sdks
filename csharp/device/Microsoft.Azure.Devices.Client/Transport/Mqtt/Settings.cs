@@ -14,7 +14,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         public TimeSpan? MaxKeepAliveTimeout { get; set; }
 
-        public QualityOfService DefaultPublishToClientQoS { get; set; }
+        public QualityOfService DefaultPublishQoS { get; set; }
 
         public string RetainPropertyName { get; set; }
 
