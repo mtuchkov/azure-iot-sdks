@@ -180,7 +180,9 @@
     <Compile Include="Common\FxTrace.cs" />
     <Compile Include="Common\HashCode.cs" />
     <Compile Include="Transport\HttpClientHelper.cs" />
+    <Compile Include="Transport\Mqtt\DeviceClientAdapter.cs" />
     <Compile Include="Transport\Mqtt\IMqttIotHubAdapter.cs" />
+    <Compile Include="Transport\Mqtt\ISettingsProvider.cs" />
     <Compile Include="Transport\Mqtt\ITopicNameRouter.cs" />
     <Compile Include="Transport\Mqtt\IWillMessageProvider.cs" />
     <Compile Include="Transport\Mqtt\ReadOnlyByteBufferStream.cs" />
