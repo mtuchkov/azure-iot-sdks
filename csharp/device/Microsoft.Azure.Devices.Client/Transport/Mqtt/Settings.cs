@@ -27,7 +27,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.ConnectArrivalTimeout = settingsProvider.GetTimeSpanSetting("ConnectArrivalTimeout");
             this.HasWill = settingsProvider.GetBooleanSetting("HasWill", DefaultHasWill);
             this.MaxKeepAliveTimeout = settingsProvider.GetTimeSpanSetting("MaxKeepAliveTimeout", DefaultMaxKeepAliveTimeout);
-            this.DefaultPublishToServerQoS = settingsProvider.GetEnumSetting("DefaultPublishToServerQoS", DefaultQualityOfService);
+            this.PublishToServerQoS = settingsProvider.GetEnumSetting("PublishToServerQoS", DefaultQualityOfService);
             this.DeviceReceiveAckCanTimeout = settingsProvider.GetBooleanSetting("DeviceReceiveAckCanTimeout", DefaultDeviceReceiveAckCanTimeout);
             this.DeviceReceiveAckTimeout = settingsProvider.GetTimeSpanSetting("DeviceReceiveAckTimeout", DefaultDeviceReceiveAckTimeout);
             this.MaxPendingOutboundMessages = settingsProvider.GetIntegerSetting("MaxPendingOutboundMessages", DefaultMaxPendingOutboundMessages);
@@ -42,7 +42,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         public TimeSpan? MaxKeepAliveTimeout { get; set; }
 
-        public QualityOfService DefaultPublishToServerQoS { get; set; }
+        public QualityOfService PublishToServerQoS { get; set; }
 
         public string RetainPropertyName { get; set; }
 

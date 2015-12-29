@@ -38,6 +38,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         static readonly Action<Task> ShutdownOnPubAckFaultAction = CreateScopedFaultAction("-> PUBACK");
         static readonly ThreadLocal<Random> ThreadLocalRandom = new ThreadLocal<Random>(() => new Random((int)DateTime.UtcNow.ToFileTimeUtc()));
 
+        StateFlags stateFlags;
+
         readonly Settings settings;
         readonly ITopicNameRouter topicNameRouter;
         readonly IWillMessageProvider willMessageProvider;
@@ -57,15 +59,16 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly ISessionStatePersistenceProvider sessionStateManager;
         Queue<Packet> connectWithSubscribeQueue;
         Queue<Packet> subscriptionChangeQueue;
-        
-        StateFlags stateFlags;
-
-        TaskCompletionSource connectCompletion;
-
         Queue<Packet> SubscriptionChangeQueue { get { return this.subscriptionChangeQueue ?? (this.subscriptionChangeQueue = new Queue<Packet>(4)); } }
         Queue<Packet> ConnectPendingQueue { get { return this.connectWithSubscribeQueue ?? (this.connectWithSubscribeQueue = new Queue<Packet>(4)); } }
         int InboundBacklogSize { get { return this.publishProcessor.BacklogSize + this.publishPubAckProcessor.BacklogSize; } }
         int MessagePendingAckCount { get { return this.publishPubAckProcessor.RequestPendingAckCount; } }
+        
+        readonly TaskCompletionSource connectCompletion;
+        readonly TaskCompletionSource disconnectCompletion;
+
+        public Task ConnectCompletion { get { return this.connectCompletion.Task; } }
+        public Task DisconnectCompletion { get { return this.disconnectCompletion.Task; } }
 
         public MqttIotHubAdapter(
             string deviceId,
@@ -75,8 +78,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             ISessionStatePersistenceProvider sessionStateManager,
             ISessionContextProvider sessionContextProvider,
             ITopicNameRouter topicNameRouter,
-            IWillMessageProvider willMessageProvider, 
-            TaskCompletionSource connectCompletion)
+            IWillMessageProvider willMessageProvider,
+            TaskCompletionSource connectCompletion,
+            TaskCompletionSource disconnectCompletion)
         {
 
             Contract.Requires(deviceId != null);
@@ -99,6 +103,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.topicNameRouter = topicNameRouter;
             this.willMessageProvider = willMessageProvider;
             this.connectCompletion = connectCompletion;
+            this.disconnectCompletion = disconnectCompletion;
             this.maxSupportedQos = QualityOfService.AtLeastOnce;
             this.keepAliveTimeout = this.settings.KeepAliveInSeconds > 0 ? TimeSpan.FromSeconds(this.settings.KeepAliveInSeconds) : (TimeSpan?)null;
             this.pingRequestTimeout = this.settings.KeepAliveInSeconds > 0 ? TimeSpan.FromSeconds(this.settings.KeepAliveInSeconds / 2d) : TimeSpan.MaxValue;
@@ -167,24 +172,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 context.Channel.EventLoop.ScheduleAsync(CheckConackTimeoutCallback, context, timeout.Value);
             }
 
-            string topicName;
-            if (this.topicNameRouter.TryMapRouteToTopicName(RouteSourceType.Notification, this.sessionContextProvider.Properties, out topicName))
-            {
+            string topicFilter = TelemetryTopicFilterFormat.FormatInvariant(this.deviceId);
+            var subscribePacket = new SubscribePacket(GenerateNextPacketId(), new SubscriptionRequest(topicFilter, this.settings.PublishToServerQoS));
 
-                var subscribePacket = new SubscribePacket
-                {
-                    PacketId = 1,
-                    Requests = new[]
-                    {
-                        new SubscriptionRequest(topicName, this.settings.DefaultPublishQoS), 
-                    }
-                };
-                this.stateFlags = StateFlags.Connecting;
-
-                //Used to send PINGREQ in case of long time of inactivity
-
-                Util.WriteMessageAsync(context, subscribePacket).OnFault(ShutdownOnWriteFaultAction, context);
-            }
+            Util.WriteMessageAsync(context, subscribePacket).OnFault(ShutdownOnWriteFaultAction, context);
             context.Read();
         }
 
@@ -255,7 +246,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             switch (packet.PacketType)
             {
                 case PacketType.CONNACK:
-                    this.AcknowledgeConnection(context, (ConnAckPacket)packet);
+                    this.CompleteConnection(context, (ConnAckPacket)packet);
                     break;
                 case PacketType.PUBLISH:
                     this.publishProcessor.Post(context, (PublishPacket)packet);
@@ -263,9 +254,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 case PacketType.PUBACK:
                     this.publishPubAckProcessor.Post(context, (PubAckPacket)packet);
                     break;
-                case PacketType.SUBSCRIBE:
-                case PacketType.UNSUBSCRIBE:
-                    this.HandleSubscriptionChange(context, packet);
+                case PacketType.SUBACK:
+                    this.CompleteSubscribe(context, (SubAckPacket)packet);
+                    break;
+                case PacketType.UNSUBACK:
+                    this.CompleteUnsubscribe(context, (UnsubAckPacket)packet);
                     break;
                 case PacketType.PINGREQ:
                     // no further action is needed - keep-alive "timer" was reset by now
@@ -281,9 +274,19 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        #region SUBSCRIBE / UNSUBSCRIBE handling
+        void CompleteUnsubscribe(IChannelHandlerContext context, UnsubAckPacket packet)
+        {
+            throw new NotImplementedException();
+        }
 
-        void HandleSubscriptionChange(IChannelHandlerContext context, Packet packet)
+        void CompleteSubscribe(IChannelHandlerContext context, SubAckPacket packet)
+        {
+            throw new NotImplementedException();
+        }
+
+        #region SUBACK / UNSUBACK handling
+
+        void CompleteSubscriptionChange(IChannelHandlerContext context, Packet packet)
         {
             this.SubscriptionChangeQueue.Enqueue(packet);
 
@@ -307,10 +310,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                     {
                         switch (packet.PacketType)
                         {
-                            case PacketType.SUBSCRIBE:
+                            case PacketType.SUBACK:
                                 acks.Add(Util.AddSubscriptions(newState, (SubscribePacket)packet, this.maxSupportedQos));
                                 break;
-                            case PacketType.UNSUBSCRIBE:
+                            case PacketType.UNSUBACK:
                                 acks.Add(Util.RemoveSubscriptions(newState, (UnsubscribePacket)packet));
                                 break;
                             default:
@@ -780,45 +783,36 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         /// </summary>
         /// <param name="context"><see cref="IChannelHandlerContext" /> instance.</param>
         /// <param name="packet">CONNECT packet.</param>
-        async void AcknowledgeConnection(IChannelHandlerContext context, ConnAckPacket packet)
+        async void CompleteConnection(IChannelHandlerContext context, ConnAckPacket packet)
         {
-            bool connAckSent = false;
-
             Exception exception = null;
             try
             {
+                if (packet.ReturnCode != ConnectReturnCode.Accepted)
+                {
+                    string reason = "CONNECT failed: " + packet.ReturnCode;
+                    ShutdownOnError(context, reason);
+                    this.connectCompletion.SetException(new IotHubException(reason));
+                    return;
+                }
+
+
                 if (!this.IsInState(StateFlags.Connecting))
                 {
-                    ShutdownOnError(context, "CONNECT has been received in current session already. Only one CONNECT is expected per session.");
+                    string reason = "CONNECT has been received in current session already. Only one CONNECT is expected per session.";
+                    ShutdownOnError(context, reason);
+                    this.connectCompletion.SetException(new IotHubException(reason));
                     return;
                 }
 
                 this.stateFlags = StateFlags.Connected;
                 
-                bool sessionPresent = await this.EstablishSessionStateAsync(this.deviceId, this.settings.CleanSession);
+                await this.EstablishSessionStateAsync(this.deviceId, this.settings.CleanSession, packet.SessionPresent);
 
-                string topicFilter = TelemetryTopicFilterFormat.FormatInvariant(this.deviceId);
-                var subscribePacket = new SubscribePacket(GenerateNextPacketId(), new SubscriptionRequest(topicFilter, this.settings.DefaultPublishToServerQoS));
-
-                Util.WriteMessageAsync(context, subscribePacket).OnFault(ShutdownOnWriteFaultAction, context);
-
-                this.keepAliveTimeout = this.DeriveKeepAliveTimeout(packet);
-
-                this.sessionContext = new Dictionary<string, string>
-                {
-                    { DeviceIdParam, this.deviceId }
-                };
+                this.CompleteConnect(context);
 
                 this.StartReceiving(context);
 
-                connAckSent = true;
-                await Util.WriteMessageAsync(context, new ConnAckPacket
-                {
-                    SessionPresent = sessionPresent,
-                    ReturnCode = ConnectReturnCode.Accepted
-                });
-
-                this.CompleteConnect(context);
             }
             catch (Exception ex)
             {
@@ -827,20 +821,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             if (exception != null)
             {
-                if (!connAckSent)
-                {
-                    try
-                    {
-                        await Util.WriteMessageAsync(context, new ConnAckPacket
-                        {
-                            ReturnCode = ConnectReturnCode.RefusedServerUnavailable
-                        });
-                    }
-                    catch (Exception ex)
-                    {
-                        
-                    }
-                }
+                this.connectCompletion.SetException(exception);
 
                 ShutdownOnError(context, "CONNECT", exception);
             }
@@ -856,32 +837,27 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         /// </summary>
         /// <param name="clientId">Client identificator to load the session state for.</param>
         /// <param name="cleanSession">Determines whether session has to be deleted if it already exists.</param>
+        /// <param name="sessionPresent">Determines wether session present on server</param>
         /// <returns></returns>
-        async Task<bool> EstablishSessionStateAsync(string clientId, bool cleanSession)
+        async Task EstablishSessionStateAsync(string clientId, bool cleanSession, bool sessionPresent)
         {
             ISessionState existingSessionState = await this.sessionStateManager.GetAsync(clientId);
-            if (cleanSession)
+
+            if (existingSessionState != null)
             {
-                if (existingSessionState != null)
+                if (!sessionPresent || cleanSession)
                 {
                     await this.sessionStateManager.DeleteAsync(clientId, existingSessionState);
-                }
-
-                this.sessionState = this.sessionStateManager.Create(true);
-                return false;
-            }
-            else
-            {
-                if (existingSessionState == null)
-                {
-                    this.sessionState = this.sessionStateManager.Create(false);
-                    return false;
+                    this.sessionState = this.sessionStateManager.Create(true);
                 }
                 else
                 {
                     this.sessionState = existingSessionState;
-                    return true;
                 }
+            }
+            else
+            {
+                this.sessionState = this.sessionStateManager.Create(true);
             }
         }
 
@@ -897,11 +873,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             return timeout;
         }
 
-        /// <summary>
-        ///     Finalizes initialization based on CONNECT packet: dispatches keep-alive timer and releases messages buffered before
-        ///     the CONNECT processing was finalized.
-        /// </summary>
-        /// <param name="context"><see cref="IChannelHandlerContext" /> instance.</param>
         void CompleteConnect(IChannelHandlerContext context)
         {
             if (this.keepAliveTimeout > TimeSpan.Zero)
@@ -910,16 +881,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
 
             this.stateFlags = StateFlags.Connected;
-
-            if (this.connectWithSubscribeQueue != null)
-            {
-                while (this.connectWithSubscribeQueue.Count > 0)
-                {
-                    Packet packet = this.connectWithSubscribeQueue.Dequeue();
-                    this.ProcessMessage(context, packet);
-                }
-                this.connectWithSubscribeQueue = null; // release unnecessary queue
-            }
         }
 
         static void CheckConnectionTimeout(object state)
