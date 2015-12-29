@@ -14,11 +14,13 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using DotNetty.Buffers;
     using DotNetty.Codecs.Mqtt.Packets;
     using DotNetty.Common;
+    using DotNetty.Common.Concurrency;
     using DotNetty.Common.Utilities;
     using DotNetty.Handlers.Tls;
     using DotNetty.Transport.Channels;
     using Microsoft.Azure.Devices.Client;
     using Microsoft.Azure.Devices.Client.Exceptions;
+    using Microsoft.Azure.Devices.Client.Extensions;
     using Microsoft.Azure.Devices.Client.Transport.Mqtt.Store;
 
     sealed class MqttIotHubAdapter : ChannelHandlerAdapter, IMqttIotHubAdapter
@@ -26,6 +28,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         const string UnmatchedFlagPropertyName = "Unmatched";
         const string SubjectPropertyName = "Subject";
         const string DeviceIdParam = "deviceId";
+        const string TelemetryTopicFilterFormat = "devices/{0}/messages/devicebound/+/";
 
         static readonly Action<object> PingServerCallback = PingServer;
         static readonly Action<object> CheckConackTimeoutCallback = CheckConnectionTimeout;
@@ -33,6 +36,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         static readonly Action<Task, object> ShutdownOnPublishFaultAction = (task, ctx) => ShutdownOnError((IChannelHandlerContext)ctx, "<- PUBLISH", task.Exception);
         static readonly Action<Task> ShutdownOnPublishToServerFaultAction = CreateScopedFaultAction("-> PUBLISH");
         static readonly Action<Task> ShutdownOnPubAckFaultAction = CreateScopedFaultAction("-> PUBACK");
+        static readonly ThreadLocal<Random> ThreadLocalRandom = new ThreadLocal<Random>(() => new Random((int)DateTime.UtcNow.ToFileTimeUtc()));
 
         readonly Settings settings;
         readonly ITopicNameRouter topicNameRouter;
@@ -56,6 +60,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         
         StateFlags stateFlags;
 
+        TaskCompletionSource connectCompletion;
+
         Queue<Packet> SubscriptionChangeQueue { get { return this.subscriptionChangeQueue ?? (this.subscriptionChangeQueue = new Queue<Packet>(4)); } }
         Queue<Packet> ConnectPendingQueue { get { return this.connectWithSubscribeQueue ?? (this.connectWithSubscribeQueue = new Queue<Packet>(4)); } }
         int InboundBacklogSize { get { return this.publishProcessor.BacklogSize + this.publishPubAckProcessor.BacklogSize; } }
@@ -69,7 +75,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             ISessionStatePersistenceProvider sessionStateManager,
             ISessionContextProvider sessionContextProvider,
             ITopicNameRouter topicNameRouter,
-            IWillMessageProvider willMessageProvider)
+            IWillMessageProvider willMessageProvider, 
+            TaskCompletionSource connectCompletion)
         {
 
             Contract.Requires(deviceId != null);
@@ -91,6 +98,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.sessionContextProvider = sessionContextProvider;
             this.topicNameRouter = topicNameRouter;
             this.willMessageProvider = willMessageProvider;
+            this.connectCompletion = connectCompletion;
             this.maxSupportedQos = QualityOfService.AtLeastOnce;
             this.keepAliveTimeout = this.settings.KeepAliveInSeconds > 0 ? TimeSpan.FromSeconds(this.settings.KeepAliveInSeconds) : (TimeSpan?)null;
             this.pingRequestTimeout = this.settings.KeepAliveInSeconds > 0 ? TimeSpan.FromSeconds(this.settings.KeepAliveInSeconds / 2d) : TimeSpan.MaxValue;
@@ -789,6 +797,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 
                 bool sessionPresent = await this.EstablishSessionStateAsync(this.deviceId, this.settings.CleanSession);
 
+                string topicFilter = TelemetryTopicFilterFormat.FormatInvariant(this.deviceId);
+                var subscribePacket = new SubscribePacket(GenerateNextPacketId(), new SubscriptionRequest(topicFilter, this.settings.DefaultPublishToServerQoS));
+
+                Util.WriteMessageAsync(context, subscribePacket).OnFault(ShutdownOnWriteFaultAction, context);
+
                 this.keepAliveTimeout = this.DeriveKeepAliveTimeout(packet);
 
                 this.sessionContext = new Dictionary<string, string>
@@ -833,6 +846,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
+        static int GenerateNextPacketId()
+        {
+            return ThreadLocalRandom.Value.Next(1, ushort.MaxValue);
+        }
+
         /// <summary>
         ///     Loads and updates (as necessary) session state.
         /// </summary>
@@ -847,7 +865,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 if (existingSessionState != null)
                 {
                     await this.sessionStateManager.DeleteAsync(clientId, existingSessionState);
-                    // todo: loop in case of concurrent access? how will we resolve conflict with concurrent connections?
                 }
 
                 this.sessionState = this.sessionStateManager.Create(true);
