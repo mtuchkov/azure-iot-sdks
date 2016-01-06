@@ -181,6 +181,7 @@
     <Compile Include="Common\HashCode.cs" />
     <Compile Include="Transport\HttpClientHelper.cs" />
     <Compile Include="Transport\Mqtt\DeviceClientAdapter.cs" />
+    <Compile Include="Transport\Mqtt\IImplementationLoader.cs" />
     <Compile Include="Transport\Mqtt\IMqttIotHubAdapter.cs" />
     <Compile Include="Transport\Mqtt\ISettingsProvider.cs" />
     <Compile Include="Transport\Mqtt\ISessionContextProvider.cs" />
