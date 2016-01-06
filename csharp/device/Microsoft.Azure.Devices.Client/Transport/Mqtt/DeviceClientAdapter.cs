@@ -6,7 +6,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using System.Threading.Tasks;
     using DotNetty.Common.Concurrency;
 
-    class DeviceClientAdapter : IDeviceClientAdapter
+    class DeviceClientAdapter
     {
         readonly TaskCompletionSource connectTaskCompletionSource;
         readonly TaskCompletionSource disconnectTaskCompletionSource;
