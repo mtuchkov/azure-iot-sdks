@@ -4,16 +4,14 @@
 namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 {
     using System;
-    using System.Collections.Concurrent;
     using System.Collections.Generic;
     using System.Diagnostics.Contracts;
     using System.IO;
-    using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
     using DotNetty.Buffers;
     using DotNetty.Codecs.Mqtt.Packets;
-    using DotNetty.Common;
+    using DotNetty.Common.Concurrency;
     using DotNetty.Common.Utilities;
     using DotNetty.Handlers.Tls;
     using DotNetty.Transport.Channels;
@@ -22,19 +20,13 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using Microsoft.Azure.Devices.Client.Extensions;
     using Microsoft.Azure.Devices.Client.Transport.Mqtt.Store;
 
-    sealed class MqttIotHubAdapter : ChannelHandlerAdapter, IMqttIotHubAdapter
+    sealed class MqttIotHubAdapter : ChannelHandlerAdapter
     {
-        const string UnmatchedFlagPropertyName = "Unmatched";
-        const string SubjectPropertyName = "Subject";
-        const string DeviceIdParam = "deviceId";
         const string TelemetryTopicFilterFormat = "devices/{0}/messages/devicebound/+/";
 
         static readonly Action<object> PingServerCallback = PingServer;
         static readonly Action<object> CheckConackTimeoutCallback = CheckConnectionTimeout;
         static readonly Action<Task, object> ShutdownOnWriteFaultAction = (task, ctx) => ShutdownOnError((IChannelHandlerContext)ctx, "WriteAndFlushAsync", task.Exception);
-        static readonly Action<Task, object> ShutdownOnPublishFaultAction = (task, ctx) => ShutdownOnError((IChannelHandlerContext)ctx, "<- PUBLISH", task.Exception);
-        static readonly Action<Task> ShutdownOnPublishToServerFaultAction = CreateScopedFaultAction("-> PUBLISH");
-        static readonly Action<Task> ShutdownOnPubAckFaultAction = CreateScopedFaultAction("-> PUBACK");
         static readonly ThreadLocal<Random> ThreadLocalRandom = new ThreadLocal<Random>(() => new Random((int)DateTime.UtcNow.ToFileTimeUtc()));
 
         StateFlags stateFlags;
@@ -42,10 +34,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly Settings settings;
         readonly ITopicNameRouter topicNameRouter;
         readonly IWillMessageProvider willMessageProvider;
+        readonly ISessionStatePersistenceProvider sessionStatePersistenceProvider;
         readonly Action connectCallback;
         readonly Action disconnectCallback;
-        readonly ConcurrentQueue<Message> receivedMessageQueue;
-        readonly ISessionContextProvider sessionContextProvider;
+        readonly Action<Message> onMessageReceived;
         ISessionState sessionState;
         
         readonly string deviceId;
@@ -54,30 +46,30 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly TimeSpan? keepAliveTimeout;
         readonly TimeSpan pingRequestTimeout;
         readonly QualityOfService maxSupportedQos;
+        QualityOfService maxQosToPublish;
         DateTime lastClientActivityTime;
-        
-        readonly PacketAsyncProcessor<PublishPacket> publishProcessor;
-        readonly RequestAckPairProcessor<AckPendingMessageState, PublishPacket> publishPubAckProcessor;
-        readonly ISessionStatePersistenceProvider sessionStatePersistenceProvider;
-        Queue<Packet> connectWithSubscribeQueue;
-        Queue<Packet> subscriptionChangeQueue;
-        Queue<Packet> SubscriptionChangeQueue { get { return this.subscriptionChangeQueue ?? (this.subscriptionChangeQueue = new Queue<Packet>(4)); } }
-        Queue<Packet> ConnectPendingQueue { get { return this.connectWithSubscribeQueue ?? (this.connectWithSubscribeQueue = new Queue<Packet>(4)); } }
-        int InboundBacklogSize { get { return this.publishProcessor.BacklogSize + this.publishPubAckProcessor.BacklogSize; } }
-        int MessagePendingAckCount { get { return this.publishPubAckProcessor.RequestPendingAckCount; } }
 
+        readonly SimpleWorkQueue<PublishWorkItem> serviceBoundPublishProcessor;
+        readonly SimpleWorkQueue<PublishWorkItem> serviceBoundPubAckProcessor;
+        
+        readonly SimpleWorkQueue<PublishPacket> deviceBoundPublishProcessor;
+        readonly SimpleWorkQueue<PublishPacket> deviceBoundPubAckProcessor;
+        
+        Queue<Packet> connectWithSubscribeQueue;
+        Queue<Packet> ConnectPendingQueue { get { return this.connectWithSubscribeQueue ?? (this.connectWithSubscribeQueue = new Queue<Packet>(4)); } }
+        int InboundBacklogSize { get { return this.serviceBoundPublishProcessor.BacklogSize + this.serviceBoundPubAckProcessor.BacklogSize; } }
+        
         public MqttIotHubAdapter(
             string deviceId, 
             string iotHubHostName, 
             string password, 
             Settings settings, 
             ISessionStatePersistenceProvider sessionStatePersistenceProvider, 
-            ISessionContextProvider sessionContextProvider, 
             ITopicNameRouter topicNameRouter, 
             IWillMessageProvider willMessageProvider, 
             Action connectCallback, 
             Action disconnectCallback, 
-            ConcurrentQueue<Message> receivedMessageQueue)
+            Action<Message> onMessageReceived)
         {
 
             Contract.Requires(deviceId != null);
@@ -96,27 +88,14 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.password = password;
             this.settings = settings;
             this.sessionStatePersistenceProvider = sessionStatePersistenceProvider;
-            this.sessionContextProvider = sessionContextProvider;
             this.topicNameRouter = topicNameRouter;
             this.willMessageProvider = willMessageProvider;
             this.connectCallback = connectCallback;
             this.disconnectCallback = disconnectCallback;
-            this.receivedMessageQueue = receivedMessageQueue;
+            this.onMessageReceived = onMessageReceived;
             this.maxSupportedQos = QualityOfService.AtLeastOnce;
             this.keepAliveTimeout = this.settings.KeepAliveInSeconds > 0 ? TimeSpan.FromSeconds(this.settings.KeepAliveInSeconds) : (TimeSpan?)null;
             this.pingRequestTimeout = this.settings.KeepAliveInSeconds > 0 ? TimeSpan.FromSeconds(this.settings.KeepAliveInSeconds / 2d) : TimeSpan.MaxValue;
-
-            this.publishProcessor = new PacketAsyncProcessor<PublishPacket>(this.PublishToServerAsync);
-            this.publishProcessor.Completion.OnFault(ShutdownOnPublishToServerFaultAction);
-            
-            TimeSpan? ackTimeout = this.settings.DeviceReceiveAckCanTimeout ? this.settings.DeviceReceiveAckTimeout : null;
-            this.publishPubAckProcessor = new RequestAckPairProcessor<AckPendingMessageState, PublishPacket>(this.AcknowledgePublishAsync, this.RetransmitNextPublish, ackTimeout);
-            this.publishPubAckProcessor.Completion.OnFault(ShutdownOnPubAckFaultAction);
-        }
-
-        public MqttIotHubAdapter(string s, string hostName, string getPassword, Settings settings1, ISessionStatePersistenceProvider persistanceProvider, ITopicNameRouter sessionContextProvider1, Action onConnected, Action onDisconnected)
-        {
-            throw new NotImplementedException();
         }
 
         #region IChannelHandler overrides
@@ -130,58 +109,44 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             base.ChannelActive(context);
         }
 
-        void ConnectCallback(object state)
+        public override Task WriteAsync(IChannelHandlerContext context, object data)
         {
-            var context = (IChannelHandlerContext)state;
-            var connectPacket = new ConnectPacket
+            string lockToken = data as string;
+            if (lockToken != null)
             {
-                ClientId = this.deviceId,
-                HasUsername = true,
-                Username = this.iotHubHostName + "/" + this.deviceId,
-                HasPassword = true,
-                Password = this.password,
-                KeepAliveInSeconds = this.settings.KeepAliveInSeconds,
-                CleanSession = this.settings.CleanSession,
-                HasWill = this.settings.HasWill
-            };
-            if (connectPacket.HasWill)
-            {
-                connectPacket.WillMessage = Unpooled.CopiedBuffer(Encoding.UTF8.GetBytes(this.willMessageProvider.Message));
-                connectPacket.WillQualityOfService = this.willMessageProvider.QoS;
-                connectPacket.WillRetain = false;
-                string willtopicName;
-                if (!this.topicNameRouter.TryMapRouteToTopicName(RouteSourceType.Notification, this.willMessageProvider.Properties, out willtopicName))
+                int packetId;
+                if (int.TryParse(lockToken, out packetId))
                 {
-                    this.Shutdown(context, true);
-                    context.FireExceptionCaught(new IotHubClientException("Cannot create will topic. Please check topic name router settings and will message properties."));
+                    this.deviceBoundPubAckProcessor.Acknowledge(packetId);
                 }
-                connectPacket.WillTopicName = willtopicName;
             }
-            this.stateFlags = StateFlags.Connecting;
-
-            //Used to send PINGREQ in case of long time of inactivity
-
-            Util.WriteMessageAsync(context, connectPacket).OnFault(ShutdownOnWriteFaultAction, context);
             
-            if (this.keepAliveTimeout.HasValue)
+            var message = data as Message;
+            if (message != null)
             {
-                this.lastClientActivityTime = DateTime.UtcNow;
-                context.Channel.EventLoop.ScheduleAsync(PingServerCallback, context, this.pingRequestTimeout);
+                var publishPacket = new PublishPacket(this.settings.PublishToServerQoS, false, false);
+                var publishCompletion = new TaskCompletionSource();
+                var workItem = new PublishWorkItem
+                {
+                    Completion = publishCompletion,
+                    Packet = publishPacket
+                };
+                switch (this.settings.PublishToServerQoS)
+                {
+                    case QualityOfService.AtMostOnce:
+                        this.serviceBoundPublishProcessor.Post(context, workItem);
+                        break;
+                    case QualityOfService.AtLeastOnce:
+                        this.serviceBoundPubAckProcessor.Post(context, workItem);
+                        break;
+                    default:
+                        throw new NotSupportedException(string.Format("Unsuppoerted telemetry QoS: '{0}'", this.settings.PublishToServerQoS));
+                }
+                return publishCompletion.Task;
             }
-
-            TimeSpan? timeout = this.settings.ConnectArrivalTimeout;
-            if (timeout.HasValue)
-            {
-                context.Channel.EventLoop.ScheduleAsync(CheckConackTimeoutCallback, context, timeout.Value);
-            }
-
-            string topicFilter = TelemetryTopicFilterFormat.FormatInvariant(this.deviceId);
-            var subscribePacket = new SubscribePacket(GenerateNextPacketId(), new SubscriptionRequest(topicFilter, this.settings.PublishToServerQoS));
-
-            Util.WriteMessageAsync(context, subscribePacket).OnFault(ShutdownOnWriteFaultAction, context);
-            context.Read();
+            throw new InvalidOperationException(string.Format("Unexpected data type: '{0}'", data.GetType().Name));
         }
-
+        
         public override void ChannelRead(IChannelHandlerContext context, object message)
         {
             var packet = message as Packet;
@@ -205,7 +170,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 else
                 {
                     // we did not start processing CONNECT yet which means we haven't received it yet but the packet of different type has arrived.
-                    ShutdownOnError(context, string.Format("First packet in the session must be CONNECT. Observed: {0}", packet));
+                    ShutdownOnError(context);
                 }
             }
         }
@@ -222,654 +187,79 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         public override void ChannelInactive(IChannelHandlerContext context)
         {
-            this.Shutdown(context, false);
+            this.Shutdown(context);
 
             base.ChannelInactive(context);
         }
 
         public override void ExceptionCaught(IChannelHandlerContext context, Exception exception)
         {
-            ShutdownOnError(context, "Exception encountered: " + exception);
+            ShutdownOnError(context);
         }
 
         public override void UserEventTriggered(IChannelHandlerContext context, object @event)
         {
             var handshakeCompletionEvent = @event as TlsHandshakeCompletionEvent;
+            if (handshakeCompletionEvent != null && !handshakeCompletionEvent.IsSuccessful)
+            {
+                ShutdownOnError(context, "TLS", handshakeCompletionEvent.Exception);
+            }
         }
 
         #endregion
 
-        void ProcessMessage(IChannelHandlerContext context, Packet packet)
+        //START
+
+        void ConnectCallback(object state)
         {
-            if (this.IsInState(StateFlags.Closed))
+            var context = (IChannelHandlerContext)state;
+            var connectPacket = new ConnectPacket
             {
-                return;
-            }
-
-            switch (packet.PacketType)
+                ClientId = this.deviceId,
+                HasUsername = true,
+                Username = this.iotHubHostName + "/" + this.deviceId,
+                HasPassword = true,
+                Password = this.password,
+                KeepAliveInSeconds = this.settings.KeepAliveInSeconds,
+                CleanSession = this.settings.CleanSession,
+                HasWill = this.settings.HasWill
+            };
+            if (connectPacket.HasWill)
             {
-                case PacketType.CONNACK:
-                    this.CompleteConnection(context, (ConnAckPacket)packet);
-                    break;
-                case PacketType.PUBLISH:
-                    this.publishProcessor.Post(context, (PublishPacket)packet);
-                    break;
-                case PacketType.PUBACK:
-                    this.publishPubAckProcessor.Post(context, (PubAckPacket)packet);
-                    break;
-                case PacketType.SUBACK:
-                    this.CompleteSubscribe(context, (SubAckPacket)packet);
-                    break;
-                case PacketType.UNSUBACK:
-                    this.CompleteUnsubscribe(context, (UnsubAckPacket)packet);
-                    break;
-                case PacketType.PINGREQ:
-                    // no further action is needed - keep-alive "timer" was reset by now
-                    Util.WriteMessageAsync(context, PingRespPacket.Instance)
-                        .OnFault(ShutdownOnWriteFaultAction, context);
-                    break;
-                case PacketType.DISCONNECT:
-                    this.Shutdown(context, true);
-                    break;
-                default:
-                    ShutdownOnError(context, string.Format("Packet of unsupported type was observed: {0}", packet));
-                    break;
-            }
-        }
-
-        void CompleteUnsubscribe(IChannelHandlerContext context, UnsubAckPacket packet)
-        {
-            throw new NotImplementedException();
-        }
-
-        void CompleteSubscribe(IChannelHandlerContext context, SubAckPacket packet)
-        {
-            throw new NotImplementedException();
-        }
-
-        #region SUBACK / UNSUBACK handling
-
-        void CompleteSubscriptionChange(IChannelHandlerContext context, Packet packet)
-        {
-            this.SubscriptionChangeQueue.Enqueue(packet);
-
-            if (!this.IsInState(StateFlags.ChangingSubscriptions))
-            {
-                this.stateFlags |= StateFlags.ChangingSubscriptions;
-                this.ProcessPendingSubscriptionChanges(context);
-            }
-        }
-
-        async void ProcessPendingSubscriptionChanges(IChannelHandlerContext context)
-        {
-            try
-            {
-                do
+                connectPacket.WillMessage = this.GetWillMessageBody(this.willMessageProvider.Message);
+                connectPacket.WillQualityOfService = this.willMessageProvider.QoS;
+                connectPacket.WillRetain = false;
+                string willtopicName;
+                if (!this.topicNameRouter.TryMapRouteToTopicName(RouteSourceType.Notification, this.willMessageProvider.Message.Properties, out willtopicName))
                 {
-                    ISessionState newState = this.sessionState.Copy();
-                    Queue<Packet> queue = this.SubscriptionChangeQueue;
-                    var acks = new List<Packet>(queue.Count);
-                    foreach (Packet packet in queue) // todo: if can queue be null here, don't force creation
-                    {
-                        switch (packet.PacketType)
-                        {
-                            case PacketType.SUBACK:
-                                acks.Add(Util.AddSubscriptions(newState, (SubscribePacket)packet, this.maxSupportedQos));
-                                break;
-                            case PacketType.UNSUBACK:
-                                acks.Add(Util.RemoveSubscriptions(newState, (UnsubscribePacket)packet));
-                                break;
-                            default:
-                                throw new ArgumentOutOfRangeException();
-                        }
-                    }
-                    queue.Clear();
-
-                    if (!this.sessionState.IsTransient)
-                    {
-                        // save updated session state, make it current once successfully set
-                        await this.sessionStatePersistenceProvider.SetAsync(this.deviceId, newState);
-                    }
-
-                    this.sessionState = newState;
-
-                    // release ACKs
-
-                    var tasks = new List<Task>(acks.Count);
-                    foreach (Packet ack in acks)
-                    {
-                        tasks.Add(context.WriteAsync(ack));
-                    }
-                    context.Flush();
-                    await Task.WhenAll(tasks);
+                    this.Shutdown(context);
+                    context.FireExceptionCaught(new IotHubClientException("Cannot create will topic. Please check topic name router settings and will message properties."));
                 }
-                while (this.subscriptionChangeQueue.Count > 0);
-
-                this.ResetState(StateFlags.ChangingSubscriptions);
+                connectPacket.WillTopicName = willtopicName;
             }
-            catch (Exception ex)
+            this.stateFlags = StateFlags.Connecting;
+
+            //Used to send PINGREQ in case of long time of inactivity
+
+            Util.WriteMessageAsync(context, connectPacket).OnFault(ShutdownOnWriteFaultAction, context);
+
+            if (this.keepAliveTimeout.HasValue)
             {
-                ShutdownOnError(context, "-> UN/SUBSCRIBE", ex);
+                this.lastClientActivityTime = DateTime.UtcNow;
+                context.Channel.EventLoop.ScheduleAsync(PingServerCallback, context, this.pingRequestTimeout);
             }
-        }
 
-        #endregion
-
-        #region PUBLISH Client -> Server handling
-
-        async Task PublishToServerAsync(IChannelHandlerContext context, PublishPacket packet)
-        {
-            if (!this.IsInState(StateFlags.Closed))
+            TimeSpan? timeout = this.settings.ConnectArrivalTimeout;
+            if (timeout.HasValue)
             {
-                return;
+                context.Channel.EventLoop.ScheduleAsync(CheckConackTimeoutCallback, context, timeout.Value);
             }
 
-            PreciseTimeSpan startedTimestamp = PreciseTimeSpan.FromStart;
+            string topicFilter = TelemetryTopicFilterFormat.FormatInvariant(this.deviceId);
+            var subscribePacket = new SubscribePacket(GenerateNextPacketId(), new SubscriptionRequest(topicFilter, this.settings.PublishToServerQoS));
 
+            Util.WriteMessageAsync(context, subscribePacket).OnFault(ShutdownOnWriteFaultAction, context);
             this.ResumeReadingIfNecessary(context);
-
-            using (Stream bodyStream = packet.Payload.IsReadable() ? new ReadOnlyByteBufferStream(packet.Payload, true) : null)
-            {
-                var message = new Message(bodyStream);
-                this.ApplyRoutingConfiguration(message, packet);
-
-                Util.CompleteMessageFromPacket(message, packet, this.settings);
-
-                await context.WriteAsync(packet);
-            }
-
-            if (!this.IsInState(StateFlags.Closed))
-            {
-                switch (packet.QualityOfService)
-                {
-                    case QualityOfService.AtMostOnce:
-                        // no response necessary
-                        break;
-                    case QualityOfService.AtLeastOnce:
-                        Util.WriteMessageAsync(context, PubAckPacket.InResponseTo(packet))
-                            .OnFault(ShutdownOnWriteFaultAction, context);
-                        break;
-                    case QualityOfService.ExactlyOnce:
-                        ShutdownOnError(context, "QoS 2 is not supported.");
-                        break;
-                    default:
-                        throw new InvalidOperationException("Unexpected QoS level: " + packet.QualityOfService);
-                }
-            }
-        }
-
-        void ResumeReadingIfNecessary(IChannelHandlerContext context)
-        {
-            if (this.InboundBacklogSize == this.settings.MaxPendingInboundMessages - 1) // we picked up a packet from full queue - now we have more room so order another read
-            {
-                context.Read();
-            }
-        }
-
-        void ApplyRoutingConfiguration(Message message, PublishPacket packet)
-        {
-            RouteDestinationType routeType;
-            if (this.topicNameRouter.TryMapTopicNameToRoute(packet.TopicName, out routeType, message.Properties))
-            {
-                // successfully matched topic against configured routes -> validate topic name
-                string messageDeviceId;
-                if (message.Properties.TryGetValue(DeviceIdParam, out messageDeviceId))
-                {
-                    message.Properties.Remove(DeviceIdParam);
-                }
-            }
-            else
-            {
-                routeType = RouteDestinationType.Telemetry;
-                message.Properties[UnmatchedFlagPropertyName] = bool.TrueString;
-                message.Properties[SubjectPropertyName] = packet.TopicName;
-            }
-
-            // once we have different routes, this will change to tackle different aspects of route types
-            switch (routeType)
-            {
-                case RouteDestinationType.Telemetry:
-                    break;
-                default:
-                    throw new ArgumentOutOfRangeException(string.Format("Unexpected route type: {0}", routeType));
-            }
-        }
-
-        #endregion
-
-        #region PUBLISH Server -> Client handling
-
-        async void Receive(IChannelHandlerContext context)
-        {
-            try
-            {
-                Message message = await this.iotHubClient.ReceiveAsync();
-                if (message == null)
-                {
-                    // link to IoT Hub has been closed
-                    this.ShutdownOnReceiveError(context, null);
-                    return;
-                }
-
-                bool receiving = this.IsInState(StateFlags.Receiving);
-                int processorsInRetransmission = 0;
-                bool messageSent = false;
-
-                if (this.publishPubAckProcessor.Retransmitting)
-                {
-                    processorsInRetransmission++;
-                    AckPendingMessageState pendingPubAck = this.publishPubAckProcessor.FirstRequestPendingAck;
-                    if (pendingPubAck.MessageId.Equals(message.MessageId, StringComparison.Ordinal))
-                    {
-                        this.RetransmitPublishMessage(context, message, pendingPubAck);
-                        messageSent = true;
-                    }
-                }
-
-                if (processorsInRetransmission == 0)
-                {
-                    this.PublishToClientAsync(context, message).OnFault(ShutdownOnPublishFaultAction, context);
-                    if (!this.IsInState(StateFlags.Closed)
-                        && (this.MessagePendingAckCount < this.settings.MaxPendingOutboundMessages))
-                    {
-                        this.Receive(context); // todo: review for potential stack depth issues
-                    }
-                    else
-                    {
-                        this.ResetState(StateFlags.Receiving);
-                    }
-                }
-                else
-                {
-                    if (receiving)
-                    {
-                        if (!messageSent)
-                        {
-                            // message id is different - "publish" this message (it actually will be enqueued for future retransmission immediately)
-                            await this.PublishToClientAsync(context, message);
-                        }
-                        this.ResetState(StateFlags.Receiving);
-                        for (int i = processorsInRetransmission - (messageSent ? 1 : 0); i > 0; i--)
-                        {
-                            // fire receive for processors that went into retransmission but held off receiving messages due to ongoing receive call
-                            this.Receive(context); // todo: review for potential stack depth issues
-                        }
-                    }
-                    else if (!messageSent)
-                    {
-                        throw new InvalidOperationException("Received a message that does not match");
-                    }
-                }
-            }
-            catch (IotHubException ex)
-            {
-                this.ShutdownOnReceiveError(context, ex.ToString());
-            }
-            catch (Exception ex)
-            {
-                ShutdownOnError(context, "Receive", ex.ToString());
-            }
-        }
-
-        async Task PublishToClientAsync(IChannelHandlerContext context, Message message)
-        {
-            try
-            {
-                using (message)
-                {
-                    if (this.settings.MaxOutboundRetransmissionEnforced && message.DeliveryCount > this.settings.MaxOutboundRetransmissionCount)
-                    {
-                        await this.RejectMessageAsync(message);
-                        return;
-                    }
-
-                    string topicName;
-                    var completeContext = new ReadOnlyMergeDictionary<string, string>(this.sessionContextProvider.Properties, message.Properties);
-                    if (!this.topicNameRouter.TryMapRouteToTopicName(RouteSourceType.Notification, completeContext, out topicName))
-                    {
-                        // source is not configured
-                        await this.RejectMessageAsync(message);
-                        return;
-                    }
-
-                    QualityOfService qos;
-                    QualityOfService maxRequestedQos;
-                    if (this.TryMatchSubscription(topicName, message.EnqueuedTimeUtc, out maxRequestedQos))
-                    {
-                        qos = Util.DeriveQos(message, this.settings);
-                        if (maxRequestedQos < qos)
-                        {
-                            qos = maxRequestedQos;
-                        }
-                    }
-                    else
-                    {
-                        // no matching subscription found - complete the message without publishing
-                        await this.RejectMessageAsync(message);
-                        return;
-                    }
-
-                    PublishPacket packet = await Util.ComposePublishPacketAsync(context, message, qos, topicName);
-                    switch (qos)
-                    {
-                        case QualityOfService.AtMostOnce:
-                            await this.PublishToClientQos0Async(context, message, packet);
-                            break;
-                        case QualityOfService.AtLeastOnce:
-                            await this.PublishToClientQos1Async(context, message, packet);
-                            break;
-                        case QualityOfService.ExactlyOnce:
-                            throw new InvalidOperationException("Requested QoS level is not supported.");
-                        default:
-                            throw new InvalidOperationException("Requested QoS level is not supported.");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                // todo: log more details
-                ShutdownOnError(context, "<- PUBLISH", ex);
-            }
-        }
-
-        async Task RejectMessageAsync(Message message)
-        {
-//            await this.iotHubClient.RejectAsync(message.LockToken); // awaiting guarantees that we won't complete consecutive message before this is completed.
-        }
-
-        Task PublishToClientQos0Async(IChannelHandlerContext context, Message message, PublishPacket packet)
-        {
-//            if (message.DeliveryCount == 0)
-//            {
-//                return Task.WhenAll(
-//                    this.iotHubClient.CompleteAsync(message.LockToken),
-//                    Util.WriteMessageAsync(context, packet));
-//            }
-//            else
-//            {
-//                return this.iotHubClient.CompleteAsync(message.LockToken);
-//            }
-            return Util.WriteMessageAsync(context, packet);
-        }
-
-        Task PublishToClientQos1Async(IChannelHandlerContext context, Message message, PublishPacket packet)
-        {
-            return this.publishPubAckProcessor.SendRequestAsync(context, packet, new AckPendingMessageState(message, packet));
-        }
-
-        async Task AcknowledgePublishAsync(IChannelHandlerContext context, AckPendingMessageState message)
-        {
-            this.ResumeReadingIfNecessary(context);
-
-            // todo: is try-catch needed here?
-            try
-            {
-                //await this.iotHubClient.CompleteAsync(message.LockToken);
-
-                if (this.publishPubAckProcessor.ResumeRetransmission(context))
-                {
-                    return;
-                }
-
-                this.RestartReceiveIfPossible(context);
-            }
-            catch (Exception ex)
-            {
-                ShutdownOnError(context, "-> PUBACK", ex);
-            }
-        }
-
-
-        void RestartReceiveIfPossible(IChannelHandlerContext context)
-        {
-            // restarting receive loop if was stopped due to reaching MaxOutstandingOutboundMessageCount cap
-            if (!this.IsInState(StateFlags.Receiving)
-                && this.MessagePendingAckCount < this.settings.MaxPendingOutboundMessages)
-            {
-                this.StartReceiving(context);
-            }
-        }
-
-        async void RetransmitNextPublish(IChannelHandlerContext context, AckPendingMessageState messageInfo)
-        {
-            bool wasReceiving = this.IsInState(StateFlags.Receiving);
-
-            try
-            {
-                //await this.iotHubClient.AbandonAsync(messageInfo.LockToken);
-
-                if (!wasReceiving)
-                {
-                    this.Receive(context);
-                }
-            }
-            catch (IotHubException ex)
-            {
-                this.ShutdownOnReceiveError(context, ex.ToString());
-            }
-            catch (Exception ex)
-            {
-                ShutdownOnError(context, ex.ToString());
-            }
-        }
-
-        sealed class AckPendingMessageState : IPacketReference, ISupportRetransmission // todo: recycle?
-        {
-            public AckPendingMessageState(Message message, PublishPacket packet)
-                : this(message.MessageId, packet.PacketId, packet.QualityOfService, message.LockToken)
-            {
-            }
-
-            public AckPendingMessageState(string messageId, int packetId, QualityOfService qualityOfService, string lockToken)
-            {
-                this.MessageId = messageId;
-                this.PacketId = packetId;
-                this.QualityOfService = qualityOfService;
-                this.LockToken = lockToken;
-                this.SentTime = DateTime.UtcNow;
-                this.StartTimestamp = PreciseTimeSpan.FromStart;
-            }
-
-            public PreciseTimeSpan StartTimestamp { get; set; }
-
-            public string MessageId { get; private set; }
-
-            public int PacketId { get; private set; }
-
-            public string LockToken { get; private set; }
-
-            public DateTime SentTime { get; private set; }
-
-            public QualityOfService QualityOfService { get; private set; }
-
-            public void Reset(Message message)
-            {
-                if (message.MessageId != this.MessageId)
-                {
-                    throw new InvalidOperationException(string.Format(
-                        "Expected to receive message with id of {0} but saw a message with id of {1}. Protocol Gateway only supports exclusive connection to IoT Hub.",
-                        this.MessageId, message.MessageId));
-                }
-
-                this.LockToken = message.LockToken;
-                this.SentTime = DateTime.UtcNow;
-            }
-
-            public void ResetMessage(Message message)
-            {
-                if (message.MessageId != this.MessageId)
-                {
-                    throw new InvalidOperationException(string.Format(
-                        "Expected to receive message with id of {0} but saw a message with id of {1}. Protocol Gateway only supports exclusive connection to IoT Hub.",
-                        this.MessageId, message.MessageId));
-                }
-
-                this.LockToken = message.LockToken;
-            }
-
-            public void ResetSentTime()
-            {
-                this.SentTime = DateTime.UtcNow;
-            }
-        }
-
-        async void RetransmitPublishMessage(IChannelHandlerContext context, Message message, AckPendingMessageState messageInfo)
-        {
-            try
-            {
-                using (message)
-                {
-                    string topicName;
-                    var completeContext = new ReadOnlyMergeDictionary<string, string>(this.sessionContextProvider.Properties, message.Properties);
-                    if (!this.topicNameRouter.TryMapRouteToTopicName(RouteSourceType.Notification, completeContext, out topicName))
-                    {
-                        throw new InvalidOperationException("Route mapping failed on retransmission.");
-                    }
-
-                    PublishPacket packet = await Util.ComposePublishPacketAsync(context, message, messageInfo.QualityOfService, topicName);
-
-                    messageInfo.ResetMessage(message);
-                    await this.publishPubAckProcessor.RetransmitAsync(context, packet, messageInfo);
-                }
-            }
-            catch (Exception ex)
-            {
-                // todo: log more details
-                ShutdownOnError(context, "<- PUBLISH (retransmission)", ex);
-            }
-        }
-
-        public enum RouteSourceType
-        {
-            Unknown,
-            Notification
-        }
-
-        bool TryMatchSubscription(string topicName, DateTime messageTime, out QualityOfService qos)
-        {
-            bool found = false;
-            qos = QualityOfService.AtMostOnce;
-            foreach (Subscription subscription in this.sessionState.Subscriptions)
-            {
-                if ((!found || subscription.QualityOfService > qos)
-                    && subscription.CreationTime < messageTime
-                    && Util.CheckTopicFilterMatch(topicName, subscription.TopicFilter))
-                {
-                    found = true;
-                    qos = subscription.QualityOfService;
-                    if (qos >= this.maxSupportedQos)
-                    {
-                        qos = this.maxSupportedQos;
-                        break;
-                    }
-                }
-            }
-            return found;
-        }
-
-        void ShutdownOnReceiveError(IChannelHandlerContext context, string exception)
-        {
-            this.publishPubAckProcessor.Abort();
-            this.publishProcessor.Abort();
-
-            ShutdownOnError(context, "Receive", exception);
-        }
-
-        #endregion
-
-        #region CONNECT handling and lifecycle management
-
-        /// <summary>
-        ///     Performs complete initialization of <see cref="MqttIotHubAdapter" /> based on received CONNECT packet.
-        /// </summary>
-        /// <param name="context"><see cref="IChannelHandlerContext" /> instance.</param>
-        /// <param name="packet">CONNECT packet.</param>
-        async void CompleteConnection(IChannelHandlerContext context, ConnAckPacket packet)
-        {
-            Exception exception = null;
-            try
-            {
-                if (packet.ReturnCode != ConnectReturnCode.Accepted)
-                {
-                    string reason = "CONNECT failed: " + packet.ReturnCode;
-                    ShutdownOnError(context, reason);
-                    throw new IotHubException(reason);
-                }
-
-
-                if (!this.IsInState(StateFlags.Connecting))
-                {
-                    string reason = "CONNECT has been received in current session already. Only one CONNECT is expected per session.";
-                    ShutdownOnError(context, reason);
-                    throw new IotHubException(reason);
-                }
-
-                this.stateFlags = StateFlags.Connected;
-                
-                await this.EstablishSessionStateAsync(this.deviceId, this.settings.CleanSession, packet.SessionPresent);
-
-                this.CompleteConnect(context);
-
-                this.StartReceiving(context);
-
-            }
-            catch (Exception ex)
-            {
-                exception = ex;
-            }
-
-            if (exception != null)
-            {
-                ShutdownOnError(context, "CONNECT", exception);
-
-                throw exception;
-            }
-        }
-
-        static int GenerateNextPacketId()
-        {
-            return ThreadLocalRandom.Value.Next(1, ushort.MaxValue);
-        }
-
-        /// <summary>
-        ///     Loads and updates (as necessary) session state.
-        /// </summary>
-        /// <param name="clientId">Client identificator to load the session state for.</param>
-        /// <param name="cleanSession">Determines whether session has to be deleted if it already exists.</param>
-        /// <param name="sessionPresent">Determines wether session present on server</param>
-        /// <returns></returns>
-        async Task EstablishSessionStateAsync(string clientId, bool cleanSession, bool sessionPresent)
-        {
-            ISessionState existingSessionState = await this.sessionStatePersistenceProvider.GetAsync(clientId);
-
-            if (existingSessionState != null)
-            {
-                if (!sessionPresent || cleanSession)
-                {
-                    await this.sessionStatePersistenceProvider.DeleteAsync(clientId, existingSessionState);
-                    this.sessionState = this.sessionStatePersistenceProvider.Create(true);
-                }
-                else
-                {
-                    this.sessionState = existingSessionState;
-                }
-            }
-            else
-            {
-                this.sessionState = this.sessionStatePersistenceProvider.Create(true);
-            }
-        }
-
-        TimeSpan DeriveKeepAliveTimeout(ConnectPacket packet)
-        {
-            TimeSpan timeout = TimeSpan.FromSeconds(packet.KeepAliveInSeconds * 1.5);
-            TimeSpan? maxTimeout = this.settings.MaxKeepAliveTimeout;
-            if (maxTimeout.HasValue && (timeout > maxTimeout.Value || timeout == TimeSpan.Zero))
-            {
-                return maxTimeout.Value;
-            }
-
-            return timeout;
         }
 
         void CompleteConnect(IChannelHandlerContext context)
@@ -888,7 +278,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             var handler = (MqttIotHubAdapter)context.Handler;
             if (handler.IsInState(StateFlags.Connecting))
             {
-                ShutdownOnError(context, "Connection timed out on waiting for CONACK packet from server.");
+                ShutdownOnError(context);
             }
         }
 
@@ -905,6 +295,107 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             context.Channel.EventLoop.ScheduleAsync(PingServerCallback, context, self.pingRequestTimeout);
         }
 
+        void ProcessMessage(IChannelHandlerContext context, Packet packet)
+        {
+            if (this.IsInState(StateFlags.Closed))
+            {
+                return;
+            }
+
+            switch (packet.PacketType)
+            {
+                case PacketType.CONNACK:
+                    this.ProcessConnect(context, (ConnAckPacket)packet);
+                    break;
+                case PacketType.PUBLISH:
+                    this.ProcessPublish(context, (PublishPacket)packet);
+                    break;
+                case PacketType.PUBACK:
+                    this.serviceBoundPubAckProcessor.Acknowledge(((PubAckPacket)packet).PacketId);
+                    break;
+                case PacketType.SUBACK:
+                    this.ProcessSubscribe(context, (SubAckPacket)packet);
+                    break;
+                case PacketType.UNSUBACK:
+                    this.ResumeReadingIfNecessary(context);
+                    break;
+                default:
+                    ShutdownOnError(context);
+                    break;
+            }
+        }
+
+        async void ProcessConnect(IChannelHandlerContext context, ConnAckPacket packet)
+        {
+            Exception exception = null;
+            try
+            {
+                if (packet.ReturnCode != ConnectReturnCode.Accepted)
+                {
+                    string reason = "CONNECT failed: " + packet.ReturnCode;
+                    ShutdownOnError(context);
+                    throw new IotHubException(reason);
+                }
+
+                if (!this.IsInState(StateFlags.Connecting))
+                {
+                    string reason = "CONNECT has been received in current session already. Only one CONNECT is expected per session.";
+                    ShutdownOnError(context);
+                    throw new IotHubException(reason);
+                }
+
+                this.stateFlags = StateFlags.Connected;
+
+                await this.EstablishSessionStateAsync(this.deviceId, this.settings.CleanSession, packet.SessionPresent);
+
+                this.CompleteConnect(context);
+
+                this.StartReceiving(context);
+            }
+            catch (Exception ex)
+            {
+                exception = ex;
+            }
+
+            if (exception != null)
+            {
+                ShutdownOnError(context, "CONNECT", exception);
+
+                throw exception;
+            }
+        }
+
+        void ProcessSubscribe(IChannelHandlerContext context, SubAckPacket packet)
+        {
+            this.maxQosToPublish = packet.QualityOfService;
+            this.ResumeReadingIfNecessary(context);
+        }
+
+        void ProcessPublish(IChannelHandlerContext context, PublishPacket packet)
+        {
+            switch (packet.QualityOfService)
+            {
+                case QualityOfService.AtMostOnce:
+                    this.deviceBoundPublishProcessor.Post(context, packet);
+                    break;
+                case QualityOfService.AtLeastOnce:
+                    this.deviceBoundPubAckProcessor.Post(context, packet);
+                    break;
+                default:
+                    throw new NotSupportedException(string.Format("Unexpected QoS: '{0}'", packet.QualityOfService));
+            }
+        }
+
+        //STOP
+        
+        void ShutdownOnReceiveError(IChannelHandlerContext context, string exception)
+        {
+            this.serviceBoundPubAckProcessor.Abort();
+            this.serviceBoundPublishProcessor.Abort();
+
+            ShutdownOnError(context, "Receive", exception);
+        }
+
         static void ShutdownOnError(IChannelHandlerContext context, string scope, Exception exception)
         {
             ShutdownOnError(context, scope, exception.ToString());
@@ -912,22 +403,19 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         static void ShutdownOnError(IChannelHandlerContext context, string scope, string exception)
         {
-            ShutdownOnError(context, string.Format("Exception occured ({0}): {1}", scope, exception));
+            ShutdownOnError(context);
         }
 
         /// <summary>
         ///     Logs error and initiates closure of both channel and hub connection.
         /// </summary>
         /// <param name="context"></param>
-        /// <param name="reason">Explanation for channel closure.</param>
-        static void ShutdownOnError(IChannelHandlerContext context, string reason)
+        static void ShutdownOnError(IChannelHandlerContext context)
         {
-            Contract.Requires(!string.IsNullOrEmpty(reason));
-
             var self = (MqttIotHubAdapter)context.Handler;
             if (!self.IsInState(StateFlags.Closed))
             {
-                self.Shutdown(context, false);
+                self.Shutdown(context);
             }
         }
 
@@ -935,8 +423,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         ///     Closes channel
         /// </summary>
         /// <param name="context"></param>
-        /// <param name="graceful"></param>
-        async void Shutdown(IChannelHandlerContext context, bool graceful)
+        async void Shutdown(IChannelHandlerContext context)
         {
             if (this.IsInState(StateFlags.Closed))
             {
@@ -975,11 +462,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             try
             {
-                this.publishProcessor.Complete();
-                this.publishPubAckProcessor.Complete();
-                await Task.WhenAll(
-                    this.publishProcessor.Completion,
-                    this.publishPubAckProcessor.Completion);
+                this.serviceBoundPublishProcessor.Complete();
+                this.serviceBoundPubAckProcessor.Complete();
+                await Task.WhenAll(this.serviceBoundPublishProcessor.Completion, this.serviceBoundPubAckProcessor.Completion);
             }
             catch
             {
@@ -987,27 +472,31 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        #endregion
-
         #region helper methods
 
-        static Action<Task> CreateScopedFaultAction(string scope)
+        void ResumeReadingIfNecessary(IChannelHandlerContext context)
         {
-            return task =>
+            if (this.InboundBacklogSize == this.settings.MaxPendingInboundMessages - 1) // we picked up a packet from full queue - now we have more room so order another read
             {
-                // ReSharper disable once PossibleNullReferenceException // called in case of fault only, so task.Exception is never null
-                var ex = task.Exception.InnerException as ChannelMessageProcessingException;
-                if (ex != null)
-                {
-                    ShutdownOnError(ex.Context, scope, task.Exception);
-                }
-            };
+                context.Read();
+            }
         }
 
         void StartReceiving(IChannelHandlerContext context)
         {
             this.stateFlags |= StateFlags.Receiving;
-            this.Receive(context);
+            try
+            {
+                //TODO:
+            }
+            catch (IotHubException ex)
+            {
+                this.ShutdownOnReceiveError(context, ex.ToString());
+            }
+            catch (Exception ex)
+            {
+                ShutdownOnError(context, "Receive", ex.ToString());
+            }
         }
 
         bool IsInState(StateFlags stateFlagsToCheck)
@@ -1015,22 +504,60 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             return (this.stateFlags & stateFlagsToCheck) == stateFlagsToCheck;
         }
 
-        bool IsInStates(StateFlags stateFlagsToCheck)
+        IByteBuffer GetWillMessageBody(Message message)
         {
-            return (this.stateFlags & stateFlagsToCheck) > 0;
+            Stream bodyStream = message.GetBodyStream();
+            var buffer = new byte[bodyStream.Length];
+            bodyStream.Read(buffer, 0, buffer.Length);
+            IByteBuffer copiedBuffer = Unpooled.CopiedBuffer(buffer);
+            return copiedBuffer;
         }
 
-        bool IsStateCompleted(StateFlags stateFlagsToCheck)
+        /// <summary>
+        ///     Loads and updates (as necessary) session state.
+        /// </summary>
+        /// <param name="clientId">Client identificator to load the session state for.</param>
+        /// <param name="cleanSession">Determines whether session has to be deleted if it already exists.</param>
+        /// <param name="sessionPresent">Determines wether session present on server</param>
+        /// <returns></returns>
+        async Task EstablishSessionStateAsync(string clientId, bool cleanSession, bool sessionPresent)
         {
-            return this.stateFlags > stateFlagsToCheck;
-        }
+            ISessionState existingSessionState = await this.sessionStatePersistenceProvider.GetAsync(clientId);
 
-        void ResetState(StateFlags stateFlagsToReset)
+            if (existingSessionState != null)
+            {
+                if (!sessionPresent || cleanSession)
+                {
+                    await this.sessionStatePersistenceProvider.DeleteAsync(clientId, existingSessionState);
+                    this.sessionState = this.sessionStatePersistenceProvider.Create(true);
+                }
+                else
+                {
+                    this.sessionState = existingSessionState;
+                }
+            }
+            else
+            {
+                this.sessionState = this.sessionStatePersistenceProvider.Create(true);
+            }
+        }
+        /// <summary>
+        ///     Performs complete initialization of <see cref="MqttIotHubAdapter" /> based on received CONNECT packet.
+        /// </summary>
+        /// <param name="context"><see cref="IChannelHandlerContext" /> instance.</param>
+        /// <param name="packet">CONNECT packet.</param>
+        static int GenerateNextPacketId()
         {
-            this.stateFlags &= ~stateFlagsToReset;
+            return ThreadLocalRandom.Value.Next(1, ushort.MaxValue);
         }
-
         #endregion
+
+
+        public enum RouteSourceType
+        {
+            Unknown,
+            Notification
+        }
 
         [Flags]
         enum StateFlags
@@ -1038,24 +565,14 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             NotConnected = 1,
             Connecting = 1 << 1,
             Connected = 1 << 2,
-            ChangingSubscriptions = 1 << 3,
-            Receiving = 1 << 4,
-            Closed = 1 << 5
+            Receiving = 1 << 3,
+            Closed = 1 << 4
         }
 
-        public Task SendEventAsync(Message repeat)
+        class PublishWorkItem
         {
-            throw new NotImplementedException();
-        }
-
-        public Task SendEventAsync(Message message, IDictionary<string, string> properties)
-        {
-            throw new NotImplementedException();
-        }
-
-        public Task<Message> ReceiveAsync(TimeSpan timeout)
-        {
-            throw new NotImplementedException();
+            public PublishPacket Packet { get; set; }
+            public TaskCompletionSource Completion { get; set; }
         }
     }
 }

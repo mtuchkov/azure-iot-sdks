@@ -10,16 +10,25 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using DotNetty.Common.Utilities;
     using DotNetty.Transport.Channels;
 
-    abstract class PacketAsyncProcessorBase<T>
+    /// <summary>
+    /// Simple work queue state machine. 
+    /// It is running work items if it is available; otherwise waits for new work item. 
+    /// Worker will resume work as soon as new work has arrived.
+    /// </summary>
+    /// <typeparam name="TWork"></typeparam>
+    class SimpleWorkQueue<TWork>
     {
-        readonly Queue<T> backlogQueue;
-        State state;
-        readonly TaskCompletionSource completionSource;
+        readonly Func<IChannelHandlerContext, TWork, Task> worker;
 
-        protected PacketAsyncProcessorBase()
+        readonly Queue<TWork> backlogQueue;
+        readonly TaskCompletionSource completionSource;
+        State state;
+
+        public SimpleWorkQueue(Func<IChannelHandlerContext, TWork, Task> worker)
         {
-            this.backlogQueue = new Queue<T>();
+            this.worker = worker;
             this.completionSource = new TaskCompletionSource();
+            this.backlogQueue = new Queue<TWork>();
         }
 
         public Task Completion
@@ -27,32 +36,43 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             get { return this.completionSource.Task; }
         }
 
+        /// <summary>
+        /// Current backlog size
+        /// </summary>
         public int BacklogSize
         {
             get { return this.backlogQueue.Count; }
         }
 
-        public void Post(IChannelHandlerContext context, T packet)
+        /// <summary>
+        /// Puts the new work to backlog queue and resume work if worker is idle.
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="workItem"></param>
+        public virtual void Post(IChannelHandlerContext context, TWork workItem)
         {
             switch (this.state)
             {
                 case State.Idle:
-                    this.backlogQueue.Enqueue(packet);
+                    this.backlogQueue.Enqueue(workItem);
                     this.state = State.Processing;
-                    this.StartQueueProcessingAsync(context);
+                    this.StartWorkQueueProcessingAsync(context);
                     break;
                 case State.Processing:
                 case State.FinalProcessing:
-                    this.backlogQueue.Enqueue(packet);
+                    this.backlogQueue.Enqueue(workItem);
                     break;
                 case State.Aborted:
-                    ReferenceCountUtil.Release(packet);
+                    ReferenceCountUtil.Release(workItem);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException();
             }
         }
 
+        /// <summary>
+        /// Stops work gracefully. All backlog will be processed.
+        /// </summary>
         public void Complete()
         {
             switch (this.state)
@@ -80,11 +100,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 case State.FinalProcessing:
                     this.state = State.Aborted;
 
-                    Queue<T> queue = this.backlogQueue;
+                    Queue<TWork> queue = this.backlogQueue;
                     while (queue.Count > 0)
                     {
-                        T packet = queue.Dequeue();
-                        ReferenceCountUtil.Release(packet);
+                        TWork workItem = queue.Dequeue();
+                        ReferenceCountUtil.Release(workItem);
                     }
                     break;
                 case State.Aborted:
@@ -94,15 +114,20 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        async void StartQueueProcessingAsync(IChannelHandlerContext context)
+        protected virtual Task DoWorkAsync(IChannelHandlerContext context, TWork packet)
+        {
+            return this.worker(context, packet);
+        }
+
+        async void StartWorkQueueProcessingAsync(IChannelHandlerContext context)
         {
             try
             {
-                Queue<T> queue = this.backlogQueue;
+                Queue<TWork> queue = this.backlogQueue;
                 while (queue.Count > 0 && this.state != State.Aborted)
                 {
-                    T message = queue.Dequeue();
-                    await this.ProcessAsync(context, message);
+                    TWork workItem = queue.Dequeue();
+                    await this.DoWorkAsync(context, workItem);
                 }
 
                 switch (this.state)
@@ -124,8 +149,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 this.completionSource.TrySetException(new ChannelMessageProcessingException(ex, context));
             }
         }
-
-        protected abstract Task ProcessAsync(IChannelHandlerContext context, T packet);
 
         enum State
         {

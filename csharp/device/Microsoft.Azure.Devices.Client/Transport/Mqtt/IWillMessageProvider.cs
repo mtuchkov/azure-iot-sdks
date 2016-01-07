@@ -3,15 +3,12 @@
 
 namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 {
-    using System.Collections.Generic;
     using DotNetty.Codecs.Mqtt.Packets;
 
     interface IWillMessageProvider
     {
-        string Message { get; }
+        Message Message { get; }
 
         QualityOfService QoS { get; set; }
-
-        IDictionary<string, string> Properties { get; set; }
     }
 }

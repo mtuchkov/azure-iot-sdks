@@ -3,10 +3,14 @@
 
 namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 {
-    class ImplementationLoader
+    using System.Diagnostics.Contracts;
+
+    class TypeLoader
     {
         public T LoadImplementation<T>()
         {
+            Contract.Assert(typeof(T).IsInterface);
+
             throw new System.NotImplementedException();
         }
     }
