@@ -6,43 +6,122 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using System;
     using System.Threading;
     using System.Threading.Tasks;
-    using Microsoft.Azure.Devices.Client.Extensions;
 
     static class TaskExtensions
     {
-        public static async Task<T> WithTimeoutAsync<T>(this Func<Task<T>> asyncOperation, TimeSpan timeout)
+        public static Task WithTimeout(this Task task, TimeSpan timeout, Func<string> errorMessage)
         {
-            var cancellationTokenSource = new CancellationTokenSource();
-            Task<T> timedOperationTask = TimedOperationAsync(cancellationTokenSource, asyncOperation);
-            await Task.WhenAny(timedOperationTask, timedOperationTask);
-            cancellationTokenSource.Cancel();
-            return timedOperationTask.Result;
+            return WithTimeout(task, timeout, errorMessage, CancellationToken.None);
         }
 
-        static async Task<T> TimedOperationAsync<T>(CancellationTokenSource cancellationTokenSource, Func<Task<T>> asyncOperation)
+        public static Task WithTimeout(this Task task, TimeSpan timeout, Func<string> errorMessage, CancellationToken token)
         {
-            try
+            timeout = NormalizeTimeout(timeout);
+
+            if (task.IsCompleted || (timeout == Timeout.InfiniteTimeSpan && !token.CanBeCanceled))
             {
-                return await asyncOperation();
+                return task;
             }
-            catch (OperationCanceledException ex)
+
+            return WithTimeoutInternal(task, timeout, errorMessage, token);
+        }
+
+        static async Task WithTimeoutInternal(Task task, TimeSpan timeout, Func<string> errorMessage, CancellationToken token)
+        {
+            using (CancellationTokenSource cts = CreateLinkedCancellationTokenSource(token))
             {
-                if (ex.CancellationToken == cancellationTokenSource.Token)
+                if (task == await Task.WhenAny(task, Task.Delay(timeout, cts.Token)))
                 {
-                    return default(T);
+                    cts.Cancel();
+                    await task;
+                    return;
                 }
-                throw;
             }
-            catch (Exception ex)
+
+            if (token.IsCancellationRequested)
             {
-                if (ex.IsFatal())
+                task.IgnoreFault();
+                token.ThrowIfCancellationRequested();
+            }
+
+            throw new TimeoutException(errorMessage());
+        }
+
+        public static Task<T> WithTimeout<T>(this Task<T> task, TimeSpan timeout, Func<string> errorMessage)
+        {
+            return WithTimeout(task, timeout, errorMessage, CancellationToken.None);
+        }
+
+        public static Task<T> WithTimeout<T>(this Task<T> task, TimeSpan timeout, Func<string> errorMessage, CancellationToken token)
+        {
+            timeout = NormalizeTimeout(timeout);
+
+            if (task.IsCompleted || (timeout == Timeout.InfiniteTimeSpan && !token.CanBeCanceled))
+            {
+                return task;
+            }
+
+            return WithTimeoutInternal(task, timeout, errorMessage, token);
+        }
+
+        static async Task<T> WithTimeoutInternal<T>(Task<T> task, TimeSpan timeout, Func<string> errorMessage, CancellationToken token)
+        {
+            using (CancellationTokenSource cts = CreateLinkedCancellationTokenSource(token))
+            {
+                if (task == await Task.WhenAny(task, Task.Delay(timeout, cts.Token)))
                 {
-                    throw;
+                    cts.Cancel();
+                    return await task;
                 }
-                cancellationTokenSource.Cancel();
-                throw;
+            }
+
+            if (token.IsCancellationRequested)
+            {
+                task.IgnoreFault();
+                token.ThrowIfCancellationRequested();
+            }
+
+            throw new TimeoutException(errorMessage());
+        }
+
+        static TimeSpan NormalizeTimeout(TimeSpan timeout)
+        {
+            if (timeout == TimeSpan.MaxValue)
+            {
+                return Timeout.InfiniteTimeSpan;
+            }
+
+            if (timeout.TotalMilliseconds > int.MaxValue)
+            {
+                return TimeSpan.FromMilliseconds(int.MaxValue);
+            }
+
+            if (timeout < TimeSpan.Zero)
+            {
+                return TimeSpan.Zero;
+            }
+
+            return timeout;
+        }
+
+        static CancellationTokenSource CreateLinkedCancellationTokenSource(CancellationToken token)
+        {
+            return token.CanBeCanceled ? CancellationTokenSource.CreateLinkedTokenSource(token) : new CancellationTokenSource();
+        }
+
+        public static void IgnoreFault(this Task task)
+        {
+            if (task.IsCompleted)
+            {
+                var ignored = task.Exception;
+            }
+            else
+            {
+                task.ContinueWith(t => { var ignored = t.Exception; },
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
             }
         }
+
         public static void OnFault(this Task task, Action<Task> faultAction)
         {
             switch (task.Status)

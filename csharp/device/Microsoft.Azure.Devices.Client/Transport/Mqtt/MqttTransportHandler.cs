@@ -17,39 +17,36 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using DotNetty.Transport.Bootstrapping;
     using DotNetty.Transport.Channels;
     using DotNetty.Transport.Channels.Sockets;
-    using Microsoft.Azure.Devices.Client.Common;
     using Microsoft.Azure.Devices.Client.Extensions;
-    using Microsoft.Azure.Devices.Client.Transport.Mqtt.Store;
 
     sealed class MqttTransportHandler : TansportHandlerBase
     {
         const int ProtocolGatewayPort = 8883;
-        static readonly ImplementationLoader typeLoader = new ImplementationLoader();
+        static readonly TypeLoader TypeLoader = new TypeLoader();
         
         readonly Bootstrap bootstrap;
         readonly IPAddress serverAddress;
         readonly TaskCompletionSource connectCompletion;
         readonly TaskCompletionSource disconnectCompletion;
-        readonly ConcurrentQueue<Message> readyQueue;
-        readonly List<string> completedMessages;
-        readonly Queue<string> readQueue;
+        readonly ConcurrentQueue<Message> messageQueue;
+        readonly Queue<string> completionQueue;
         readonly MqttIotHubAdapterFactory mqttIotHubAdapterFactory;
         readonly QualityOfService qos;
         Func<Task> cleanupFunc;
         IChannel channel;
-        readonly SemaphoreSlim semaphor = new SemaphoreSlim(1, 1);
+        readonly object syncRoot = new object();
+        readonly SemaphoreSlim receivingSemaphore = new SemaphoreSlim(0);
 
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString)
         {
             this.connectCompletion = new TaskCompletionSource();
             this.disconnectCompletion = new TaskCompletionSource();
-            this.mqttIotHubAdapterFactory = new MqttIotHubAdapterFactory(typeLoader);
-            this.readyQueue = new ConcurrentQueue<Message>();
-            this.readQueue = new Queue<string>();
-            this.completedMessages = new List<string>();
+            this.mqttIotHubAdapterFactory = new MqttIotHubAdapterFactory(TypeLoader);
+            this.messageQueue = new ConcurrentQueue<Message>();
+            this.completionQueue = new Queue<string>();
             this.serverAddress = Dns.GetHostEntry(iotHubConnectionString.HostName).AddressList[0];
             var group = new SingleInstanceEventLoopGroup();
-            var settings = new Settings(typeLoader.LoadImplementation<ISettingsProvider>());
+            var settings = new Settings(TypeLoader.LoadImplementation<ISettingsProvider>());
             this.qos = settings.PublishToServerQoS;
 
             this.bootstrap = new Bootstrap()
@@ -62,7 +59,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                         TlsHandler.Client(iotHubConnectionString.HostName, null),
                         MqttEncoder.Instance,
                         new MqttDecoder(false, 256 * 1024),
-                        this.mqttIotHubAdapterFactory.Create(this.OnConnected, this.OnDisconnected, iotHubConnectionString, settings, this.readyQueue));
+                        this.mqttIotHubAdapterFactory.Create(this.OnConnected, this.OnDisconnected, this.OnMessageReceived, iotHubConnectionString, settings));
                 }));
 
             this.ScheduleCleanup(async () =>
@@ -182,47 +179,51 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         protected override Task<Message> OnReceiveAsync(TimeSpan timeout)
         {
-            Func<Task<Message>> asyncOperation = this.PeekAsync;
-            return asyncOperation.WithTimeoutAsync(timeout);
+            var cancellationToken = new CancellationToken();
+            return this.PeekAsync(cancellationToken).WithTimeout(timeout, () => "Receive message timed out.", cancellationToken);
         }
 
-        async Task<Message> PeekAsync()
+        async Task<Message> PeekAsync(CancellationToken cancellationToken)
         {
-            Message message;
-            while (!this.readyQueue.TryDequeue(out message))
+            while (!cancellationToken.IsCancellationRequested)
             {
-                await Task.Delay(100);
+                await this.receivingSemaphore.WaitAsync(cancellationToken);
+                Message message;
+                lock (this.syncRoot)
+                {
+                    if (!this.messageQueue.TryDequeue(out message))
+                    {
+                        continue;
+                    }
+                     if (this.qos == QualityOfService.AtLeastOnce)
+                    {
+                        this.completionQueue.Enqueue(message.LockToken);
+                    }
+                }
+                return message;
             }
-
-            await this.semaphor.WaitAsync();
-            this.readQueue.Enqueue(message.LockToken);
-            this.semaphor.Release();
-            
-            return message;
+            throw new OperationCanceledException("Exit by timeout");
         }
 
         protected override async Task OnCompleteAsync(string lockToken)
         {
             if (this.qos == QualityOfService.AtMostOnce)
             {
-                return;
+                throw new InvalidOperationException("Complete is not allowed for QoS 0.");
             }
-            
-            await this.semaphor.WaitAsync();
-            this.completedMessages.Add(lockToken);
-            await this.TryAcknowledgeAsync();
-            
-            this.semaphor.Release();
-        }
 
-        async Task TryAcknowledgeAsync()
-        {
-            while (this.completedMessages.Contains(this.readQueue.Peek()))
+            lock (this.syncRoot)
             {
-                string lockToken = this.readQueue.Dequeue();
-                this.completedMessages.Remove(lockToken);
-                await this.channel.WriteAndFlushAsync(new PubAckPacket());
+                if (this.completionQueue.Peek() == lockToken)
+                {
+                    this.completionQueue.Dequeue();
+                }
+                else
+                {
+                    throw new InvalidOperationException("Client MUST send PUBACK packets in the order in which the corresponding PUBLISH packets were received (QoS 1 messages) per [MQTT-4.6.0-2]");
+                }
             }
+            await this.channel.WriteAndFlushAsync(lockToken);
         }
 
         protected override Task OnAbandonAsync(string lockToken)
@@ -245,6 +246,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.disconnectCompletion.Complete();
         }
 
+        void OnMessageReceived(Message message)
+        {
+            this.messageQueue.Enqueue(message);
+            this.receivingSemaphore.Release();
+        }
+
         void ScheduleCleanup(Func<Task> cleanupTask)
         {
             Func<Task> currentCleanupFunc = this.cleanupFunc;
@@ -257,42 +264,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
                 await cleanupTask();
             };
-        }
-    }
-
-    class MqttIotHubAdapterFactory 
-    {
-        readonly ImplementationLoader typeLoader;
-
-        public MqttIotHubAdapterFactory(ImplementationLoader typeLoader)
-        {
-            this.typeLoader = typeLoader;
-        }
-
-        public MqttIotHubAdapter Create(
-            Action onConnected, Action 
-            onDisconnected, 
-            IotHubConnectionString iotHubConnectionString, 
-            Settings settings, 
-            ConcurrentQueue<Message> receivedMessageQueue)
-        {
-            var persistanceProvider = this.typeLoader.LoadImplementation<ISessionStatePersistenceProvider>();
-            var willMessageProvider = this.typeLoader.LoadImplementation<IWillMessageProvider>();
-            var topicNameRouter = this.typeLoader.LoadImplementation<ITopicNameRouter>();
-            var sessionContextProvider = this.typeLoader.LoadImplementation<ISessionContextProvider>();
-
-            return new MqttIotHubAdapter(
-                iotHubConnectionString.DeviceId,
-                iotHubConnectionString.HostName,
-                iotHubConnectionString.GetPassword(),
-                settings,
-                persistanceProvider,
-                sessionContextProvider,
-                topicNameRouter,
-                willMessageProvider,
-                onConnected,
-                onDisconnected,
-                receivedMessageQueue);
         }
     }
 }
