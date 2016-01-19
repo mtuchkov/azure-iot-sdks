@@ -8,14 +8,13 @@ namespace Microsoft.Azure.Devices.Client
     using System.Text.RegularExpressions;
     using Microsoft.Azure.Devices.Client.Extensions;
     using Microsoft.Azure.Devices.Client.Transport;
-    using Microsoft.Azure.Devices.Client.Transport.Mqtt;
-
     // C# using aliases cannot name an unbound generic type declaration without supplying type arguments
     // Therefore, define a separate alias for each type argument
 #if WINDOWS_UWP
     using AsyncTask = Windows.Foundation.IAsyncAction;
     using AsyncTaskOfMessage = Windows.Foundation.IAsyncOperation<Message>;
 #else
+    using Microsoft.Azure.Devices.Client.Transport.Mqtt;
     using AsyncTask = System.Threading.Tasks.Task;
     using AsyncTaskOfMessage = System.Threading.Tasks.Task<Message>;
 #endif
@@ -158,7 +157,11 @@ namespace Microsoft.Azure.Devices.Client
                 case TransportType.Http1:
                     return new DeviceClient(new HttpTransportHandler(iotHubConnectionString));
                 case TransportType.Mqtt:
+#if WINDOWS_UWP
+                    throw new NotImplementedException();
+#else
                     return new DeviceClient(new MqttTransportHandler(iotHubConnectionString));
+#endif
                 default:
                     throw new InvalidOperationException("Unsupported Transport Type {0}".FormatInvariant(transportType));
             }

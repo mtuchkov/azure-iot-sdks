@@ -8,13 +8,13 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
     public class StaticWillMessageProvider : IWillMessageProvider
     {
-        public string Message { get; private set; }
+        public Message Message { get; private set; }
 
         public QualityOfService QoS { get; set; }
 
         public IDictionary<string, string> Properties { get; set; }
 
-        public StaticWillMessageProvider(QualityOfService qos, string message, IDictionary<string, string> properties)
+        public StaticWillMessageProvider(QualityOfService qos, Message message, IDictionary<string, string> properties)
         {
             this.QoS = qos;
             this.Message = message;

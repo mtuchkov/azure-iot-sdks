@@ -11,13 +11,13 @@ namespace Microsoft.Azure.Devices.Client.Transport
     using System.Linq;
     using System.Net;
     using System.Net.Http;
-    using System.Net.Http.Formatting;
     using System.Net.Http.Headers;
     using System.Threading;
     using System.Threading.Tasks;
     using Microsoft.Azure.Devices.Client.Exceptions;
     using Microsoft.Azure.Devices.Client.Extensions;
 #if !WINDOWS_UWP
+    using System.Net.Http.Formatting;
 #endif
 
     sealed class HttpClientHelper : IHttpClientHelper

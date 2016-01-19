@@ -117,7 +117,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 int packetId;
                 if (int.TryParse(lockToken, out packetId))
                 {
-                    this.deviceBoundPubAckProcessor.Acknowledge(packetId);
+//                    this.deviceBoundPubAckProcessor.Acknowledge(packetId);
                 }
             }
             
@@ -311,7 +311,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                     this.ProcessPublish(context, (PublishPacket)packet);
                     break;
                 case PacketType.PUBACK:
-                    this.serviceBoundPubAckProcessor.Acknowledge(((PubAckPacket)packet).PacketId);
+//                    this.serviceBoundPubAckProcessor.Acknowledge(((PubAckPacket)packet).PacketId);
                     break;
                 case PacketType.SUBACK:
                     this.ProcessSubscribe(context, (SubAckPacket)packet);
