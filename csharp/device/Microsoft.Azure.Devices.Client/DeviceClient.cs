@@ -21,6 +21,7 @@ namespace Microsoft.Azure.Devices.Client
     using AsyncTask = Windows.Foundation.IAsyncAction;
     using AsyncTaskOfMessage = Windows.Foundation.IAsyncOperation<Message>;
 #else
+    using Microsoft.Azure.Devices.Client.Transport.Mqtt;
     using AsyncTask = System.Threading.Tasks.Task;
     using AsyncTaskOfMessage = System.Threading.Tasks.Task<Message>;
 #endif
@@ -204,6 +205,7 @@ namespace Microsoft.Azure.Devices.Client
                     return new DeviceClient(new HttpDeviceClient(iotHubConnectionString), TransportType.Http1);
 #else
                     return CreateFromConnectionString(connectionString, new ITransportSettings[] { new Http1TransportSettings() });
+#endif
 #endif
                 default:
                     throw new InvalidOperationException("Unsupported Transport Type {0}".FormatInvariant(transportType));
