@@ -78,7 +78,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             return topicFilterIndex == topicFilter.Length && topicNameIndex == topicName.Length;
         }
 
-        public static QualityOfService DeriveQos(Message message, Settings config)
+        public static QualityOfService DeriveQos(Message message, MqttTransportSettings config)
         {
             QualityOfService qos;
             string qosValue;
@@ -105,16 +105,16 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             return qos;
         }
 
-        public static Message CompleteMessageFromPacket(Message message, PublishPacket packet, Settings settings)
+        public static Message CompleteMessageFromPacket(Message message, PublishPacket packet, MqttTransportSettings mqttTransportSettings)
         {
             message.MessageId = Guid.NewGuid().ToString("N");
             if (packet.RetainRequested)
             {
-                message.Properties[settings.RetainPropertyName] = IotHubTrueString;
+                message.Properties[mqttTransportSettings.RetainPropertyName] = IotHubTrueString;
             }
             if (packet.Duplicate)
             {
-                message.Properties[settings.DupPropertyName] = IotHubTrueString;
+                message.Properties[mqttTransportSettings.DupPropertyName] = IotHubTrueString;
             }
 
             return message;
@@ -216,9 +216,19 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             return ack;
         }
 
-        public static async Task WriteMessageAsync(IChannelHandlerContext context, object message)
+        public static async Task WriteMessageAsync(IChannelHandlerContext context, object message, Func<IChannelHandlerContext, Exception, bool> exceptionHandler)
         {
-            await context.WriteAndFlushAsync(message);
+            try
+            {
+                await context.WriteAndFlushAsync(message);
+            }
+            catch (Exception ex)
+            {
+                if (!exceptionHandler(context, ex))
+                {
+                    throw;
+                }
+            }
         }
     }
 }

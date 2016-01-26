@@ -22,7 +22,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     sealed class MqttTransportHandler : TansportHandlerBase
     {
         const int ProtocolGatewayPort = 8883;
-        static readonly TypeLoader TypeLoader = new TypeLoader();
         
         readonly Bootstrap bootstrap;
         readonly IPAddress serverAddress;
@@ -38,15 +37,20 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly SemaphoreSlim receivingSemaphore = new SemaphoreSlim(0);
 
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString)
+            : this(iotHubConnectionString, new MqttTransportSettings())
+        {
+            
+        }
+
+        internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings)
         {
             this.connectCompletion = new TaskCompletionSource();
             this.disconnectCompletion = new TaskCompletionSource();
-            this.mqttIotHubAdapterFactory = new MqttIotHubAdapterFactory(TypeLoader);
+            this.mqttIotHubAdapterFactory = new MqttIotHubAdapterFactory(settings);
             this.messageQueue = new ConcurrentQueue<Message>();
             this.completionQueue = new Queue<string>();
             this.serverAddress = Dns.GetHostEntry(iotHubConnectionString.HostName).AddressList[0];
             var group = new SingleInstanceEventLoopGroup();
-            var settings = new Settings(TypeLoader.LoadImplementation<ISettingsProvider>());
             this.qos = settings.PublishToServerQoS;
 
             this.bootstrap = new Bootstrap()

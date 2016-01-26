@@ -4,16 +4,15 @@
 namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 {
     using System;
-    using System.Collections.Concurrent;
     using Microsoft.Azure.Devices.Client.Transport.Mqtt.Store;
 
     class MqttIotHubAdapterFactory 
     {
-        readonly TypeLoader typeLoader;
+        readonly MqttTransportSettings settings;
 
-        public MqttIotHubAdapterFactory(TypeLoader typeLoader)
+        public MqttIotHubAdapterFactory(MqttTransportSettings settings)
         {
-            this.typeLoader = typeLoader;
+            this.settings = settings;
         }
 
         public MqttIotHubAdapter Create(
@@ -21,17 +20,17 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             Action onDisconnected, 
             Action<Message> onMessageReceived, 
             IotHubConnectionString iotHubConnectionString, 
-            Settings settings)
+            MqttTransportSettings mqttTransportSettings)
         {
-            var persistanceProvider = this.typeLoader.LoadImplementation<ISessionStatePersistenceProvider>();
-            var topicNameRouter = this.typeLoader.LoadImplementation<ITopicNameRouter>();
-            IWillMessageProvider willMessageProvider = settings.HasWill ? this.typeLoader.LoadImplementation<IWillMessageProvider>() : null;
+            ISessionStatePersistenceProvider persistanceProvider = this.settings.SessionStatePersistenceProvider;
+            ITopicNameRouter topicNameRouter = this.settings.TopicNameRouter;
+            IWillMessageProvider willMessageProvider = mqttTransportSettings.HasWill ? this.settings.WillMessageProvider : null;
             
             return new MqttIotHubAdapter(
                 iotHubConnectionString.DeviceId,
                 iotHubConnectionString.HostName,
                 iotHubConnectionString.GetPassword(),
-                settings,
+                mqttTransportSettings,
                 persistanceProvider,
                 topicNameRouter,
                 willMessageProvider,
