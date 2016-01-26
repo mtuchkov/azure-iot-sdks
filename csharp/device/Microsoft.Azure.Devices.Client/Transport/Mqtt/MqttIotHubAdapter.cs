@@ -7,6 +7,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using System.Collections.Generic;
     using System.Diagnostics.Contracts;
     using System.IO;
+    using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
     using DotNetty.Buffers;
@@ -288,16 +289,22 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             switch (packet.PacketType)
             {
                 case PacketType.CONNACK:
-                    this.ProcessConnect(context, (ConnAckPacket)packet);
+                    this.ProcessConnectAck(context, (ConnAckPacket)packet);
+                    break;
+                case PacketType.SUBSCRIBE:
+                    this.ProcessSubscribe(context, (SubscribePacket)packet);
+                    break;
+                case PacketType.SUBACK:
+                    this.ProcessSubscribeAck(context, (SubAckPacket)packet);
+                    break;
+                case PacketType.PINGRESP:
+                    this.ProcessPingResponse(context, (PingRespPacket)packet);
                     break;
                 case PacketType.PUBLISH:
                     this.ProcessPublish(context, (PublishPacket)packet);
                     break;
                 case PacketType.PUBACK:
 //                    this.serviceBoundPubAckProcessor.Acknowledge(((PubAckPacket)packet).PacketId);
-                    break;
-                case PacketType.SUBACK:
-                    this.ProcessSubscribe(context, (SubAckPacket)packet);
                     break;
                 case PacketType.UNSUBACK:
                     this.ResumeReadingIfNecessary(context);
@@ -308,7 +315,22 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        async void ProcessConnect(IChannelHandlerContext context, ConnAckPacket packet)
+        void ProcessSubscribe(IChannelHandlerContext context, SubscribePacket packet)
+        {
+            if (packet.Requests.Count == 0 || packet.Requests.Count > 1)
+            {
+                ShutdownOnError(context, "Subscribe", "subscribe request must be only one.");
+            }
+            SubscriptionRequest subscribeRequest = packet.Requests[0];
+            if (this.topicNameRouter.TryMapTopicNameToRoute(packet.Requests, out RouteDestinationType.Telemetry, out     
+        }
+
+        void ProcessPingResponse(IChannelHandlerContext context, PingRespPacket packet)
+        {
+            this.lastClientActivityTime = DateTime.UtcNow;
+        }
+
+        async void ProcessConnectAck(IChannelHandlerContext context, ConnAckPacket packet)
         {
             Exception exception = null;
             try
@@ -317,14 +339,16 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 {
                     string reason = "CONNECT failed: " + packet.ReturnCode;
                     ShutdownOnError(context);
-                    throw new IotHubException(reason);
+                    context.FireExceptionCaught(new IotHubException(reason));
+                    return;
                 }
 
                 if (!this.IsInState(StateFlags.Connecting))
                 {
-                    string reason = "CONNECT has been received in current session already. Only one CONNECT is expected per session.";
+                    string reason = "CONNECT has been received, however a session has already been establish. Only one CONNECT?CONACK pair is expected per session.";
                     ShutdownOnError(context);
-                    throw new IotHubException(reason);
+                    context.FireExceptionCaught(new IotHubException(reason));
+                    return;
                 }
 
                 await this.EstablishSessionStateAsync(this.deviceId, this.mqttTransportSettings.CleanSession, packet.SessionPresent);
@@ -348,7 +372,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        void ProcessSubscribe(IChannelHandlerContext context, SubAckPacket packet)
+        void ProcessSubscribeAck(IChannelHandlerContext context, SubAckPacket packet)
         {
             this.maxSupportedQos = packet.QualityOfService;
             this.ResumeReadingIfNecessary(context);
@@ -468,18 +492,18 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         void StartReceiving(IChannelHandlerContext context)
         {
             this.stateFlags |= StateFlags.Receiving;
-            try
-            {
-                //TODO:
-            }
-            catch (IotHubException ex)
-            {
-                this.ShutdownOnReceiveError(context, ex.ToString());
-            }
-            catch (Exception ex)
-            {
-                ShutdownOnError(context, "Receive", ex.ToString());
-            }
+//            try
+//            {
+//                //TODO:
+//            }
+//            catch (IotHubException ex)
+//            {
+//                this.ShutdownOnReceiveError(context, ex.ToString());
+//            }
+//            catch (Exception ex)
+//            {
+//                ShutdownOnError(context, "Receive", ex.ToString());
+//            }
         }
 
         bool IsInState(StateFlags stateFlagsToCheck)
