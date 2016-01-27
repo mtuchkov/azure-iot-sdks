@@ -10,8 +10,50 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using DotNetty.Common.Utilities;
     using DotNetty.Transport.Channels;
 
+    class OrderedTwoPhaseWorkQueue<TWorkId, TWork> : SimpleWorkQueue<TWork> where TWorkId:IEquatable<TWorkId>
+    {
+        class IncompleteWorkItem
+        {
+            public IncompleteWorkItem(TWorkId id, TWork workItem)
+            {
+                this.WorkItem = workItem;
+                this.Id = id;
+            }
+
+            public TWork WorkItem { get; set; }
+
+            public TWorkId Id { get; set; }
+        }
+        readonly Func<TWork, TWorkId> getWorkId;
+        readonly Func<IChannelHandlerContext, TWork, Task> completeWork;
+        readonly Queue<IncompleteWorkItem> incompleteQueue = new Queue<IncompleteWorkItem>();
+
+        public OrderedTwoPhaseWorkQueue(Func<IChannelHandlerContext, TWork, Task> worker, Func<TWork, TWorkId> getWorkId, Func<IChannelHandlerContext, TWork, Task> completeWork)
+            : base(worker)
+        {
+            this.getWorkId = getWorkId;
+            this.completeWork = completeWork;
+        }
+
+        public Task CompleteWorkAsync(IChannelHandlerContext context, TWorkId workId)
+        {
+            IncompleteWorkItem incompleteWorkItem = this.incompleteQueue.Dequeue();
+            if (incompleteWorkItem.Id .Equals(workId))
+            {
+                return this.completeWork(context, incompleteWorkItem.WorkItem);
+            }
+            throw new InvalidOperationException(string.Format("Work must be complete in the same order as it was started. Expected work id: '{0}', actual work id: '{1}'", incompleteWorkItem.Id, workId));
+        }
+
+        protected override async Task DoWorkAsync(IChannelHandlerContext context, TWork work)
+        {
+            await base.DoWorkAsync(context, work);
+            this.incompleteQueue.Enqueue(new IncompleteWorkItem(this.getWorkId(work), work));
+        }
+    }
+
     /// <summary>
-    /// Simple work queue state machine. 
+    /// Simple work queue with lifecycle state machine. 
     /// It is running work items if it is available; otherwise waits for new work item. 
     /// Worker will resume work as soon as new work has arrived.
     /// </summary>
@@ -114,9 +156,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        protected virtual Task DoWorkAsync(IChannelHandlerContext context, TWork packet)
+        protected virtual Task DoWorkAsync(IChannelHandlerContext context, TWork work)
         {
-            return this.worker(context, packet);
+            return this.worker(context, work);
         }
 
         async void StartWorkQueueProcessingAsync(IChannelHandlerContext context)

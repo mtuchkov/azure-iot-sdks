@@ -17,6 +17,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using DotNetty.Transport.Bootstrapping;
     using DotNetty.Transport.Channels;
     using DotNetty.Transport.Channels.Sockets;
+    using Microsoft.Azure.Devices.Client.Exceptions;
     using Microsoft.Azure.Devices.Client.Extensions;
 
     sealed class MqttTransportHandler : TansportHandlerBase
@@ -240,20 +241,41 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             throw new NotSupportedException();
         }
 
-        void OnConnected()
+        void OnConnected(MqttIotHubAdapter sender, MqttEventArgs args)
         {
-            this.connectCompletion.Complete();
+            if (args.Succeed)
+            {
+                this.connectCompletion.Complete();
+            }
+            else
+            {
+                this.connectCompletion.SetException(args.Exception);
+            }
         }
 
-        void OnDisconnected()
+        void OnDisconnected(MqttIotHubAdapter sender, MqttEventArgs args)
         {
-            this.disconnectCompletion.Complete();
+            if (args.Succeed)
+            {
+                this.disconnectCompletion.Complete();
+            }
+            else
+            {
+                this.connectCompletion.SetException(args.Exception);
+            }
         }
 
-        void OnMessageReceived(Message message)
+        void OnMessageReceived(MqttIotHubAdapter sender, MqttMessageReceivedEventArgs args)
         {
-            this.messageQueue.Enqueue(message);
-            this.receivingSemaphore.Release();
+            if (args.Succeed)
+            {
+                this.messageQueue.Enqueue(args.Message);
+                this.receivingSemaphore.Release();
+            }
+            else
+            {
+                throw new IotHubException(args.Exception);
+            }
         }
 
         void ScheduleCleanup(Func<Task> cleanupTask)
@@ -269,5 +291,20 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 await cleanupTask();
             };
         }
+    }
+
+    class MqttEventArgs
+    {
+        public bool Succeed
+        {
+            get { return this.Exception != null; }
+        }
+
+        public Exception Exception { get; set; }
+    }
+
+    class MqttMessageReceivedEventArgs : MqttEventArgs
+    {
+        public Message Message { get; set; }
     }
 }
