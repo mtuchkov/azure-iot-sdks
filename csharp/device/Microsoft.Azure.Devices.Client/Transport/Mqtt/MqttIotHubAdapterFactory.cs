@@ -16,9 +16,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         }
 
         public MqttIotHubAdapter Create(
-            Action onConnected, 
-            Action onDisconnected, 
-            Action<Message> onMessageReceived, 
+            Action<MqttIotHubAdapter, MqttEventArgs> onConnected, 
+            Action<MqttIotHubAdapter, MqttEventArgs> onDisconnected, 
+            Action<MqttIotHubAdapter, MqttMessageReceivedEventArgs> onMessageReceived, 
             IotHubConnectionString iotHubConnectionString, 
             MqttTransportSettings mqttTransportSettings)
         {
