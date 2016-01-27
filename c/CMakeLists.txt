@@ -1,7 +1,7 @@
 #Copyright (c) Microsoft. All rights reserved.
 #Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 2.8.11)
 project(azure_iot_sdks)
 
 #the following variables are project-wide and can be used with cmake-gui
@@ -48,8 +48,8 @@ endif()
 function(includeProton)
 	if(WIN32)
 		include_directories($ENV{proton_path}/qpid-proton/proton-c/include)
-	elseif( NOT "${PRONTON_C_INCLUDES}" STREQUAL "" )
-		include_directories(${PRONTON_C_INCLUDES})
+	elseif( NOT "${PROTON_C_INCLUDES}" STREQUAL "" )
+		include_directories(${PROTON_C_INCLUDES})
 	endif()
 endfunction(includeProton)
 
