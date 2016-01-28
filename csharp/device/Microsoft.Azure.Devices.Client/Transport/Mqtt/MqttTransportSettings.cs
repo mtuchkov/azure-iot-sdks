@@ -30,6 +30,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         const int DefaultMaxPendingInboundMessages = 50;
         const int DefaultMaxOutboundRetransmissionCount = 0;
         const QualityOfService DefaultPublishToServerQoS = QualityOfService.AtLeastOnce;
+        const QualityOfService DefaultReceivingQoS = QualityOfService.AtLeastOnce;
         static readonly TimeSpan DefaultConnectArrivalTimeout = TimeSpan.FromSeconds(300);
         static readonly TimeSpan DefaultDeviceReceiveAckTimeout = TimeSpan.FromSeconds(300);
         static readonly TimeSpan DefaultMaxKeepAliveTimeout = TimeSpan.FromSeconds(DefaultKeepAliveInSeconds / 2d);
@@ -70,7 +71,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.MaxOutboundRetransmissionEnforced = this.GetBoolean(parent, "defaultMaxOutboundRetransmissionEnforced", DefaultMaxOutboundRetransmissionEnforced);
             this.MaxPendingOutboundMessages = this.GetInteger(parent, "maxPendingOutboundMessages", DefaultMaxPendingOutboundMessages);
             this.MaxPendingInboundMessages = this.GetInteger(parent, "maxPendingInboundMessages", DefaultMaxPendingInboundMessages);
-            this.PublishToServerQoS = this.GetEnum<QualityOfService>(parent, "publishToServerQoS", DefaultPublishToServerQoS);
+            this.PublishToServerQoS = this.GetEnum(parent, "publishToServerQoS", DefaultPublishToServerQoS);
+            this.ReceivingQoS = this.GetEnum(parent, "receivingQoS", DefaultReceivingQoS);
             this.QoSPropertyName = parent.GetAttribute("qoSPropertyName");
             this.RetainPropertyName = "mqtt-retain";
             this.SessionStatePersistenceProvider = new InMemorySessionStateProvider(); // this.CreateImplementation<ISessionStatePersistenceProvider>(configuration.SessionStatePersistenceProviderTypeName, typeof(InMemorySessionStateProvider));
@@ -85,6 +87,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         public TimeSpan MaxKeepAliveTimeout { get; set; }
 
         public QualityOfService PublishToServerQoS { get; set; }
+
+        public QualityOfService ReceivingQoS { get; set; }
 
         public string RetainPropertyName { get; set; }
 

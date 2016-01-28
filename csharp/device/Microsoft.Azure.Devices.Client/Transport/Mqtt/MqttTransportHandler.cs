@@ -261,7 +261,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
             else
             {
-                this.connectCompletion.SetException(args.Exception);
+                this.disconnectCompletion.SetException(args.Exception);
             }
         }
 
@@ -297,7 +297,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     {
         public bool Succeed
         {
-            get { return this.Exception != null; }
+            get { return this.Exception == null; }
         }
 
         public Exception Exception { get; set; }
