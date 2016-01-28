@@ -185,6 +185,7 @@
     <Compile Include="Transport\Mqtt\IMqttIotHubAdapter.cs" />
     <Compile Include="Transport\Mqtt\ISettingsProvider.cs" />
     <Compile Include="Transport\Mqtt\SimpleWorkerStateMachine.cs" />
+    <Compile Include="Transport\Mqtt\OrderedTwoPhaseWorkQueue.cs" />
     <Compile Include="Transport\Mqtt\SimpleWorkQueue.cs" />
     <Compile Include="Transport\Mqtt\ISessionContextProvider.cs" />
     <Compile Include="Transport\Mqtt\ITopicNameRouter.cs" />
