@@ -233,7 +233,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         public static void PopulateMessagePropertiesFromPacket(Message message, PublishPacket publish)
         {
-            throw new NotImplementedException();
+            message.LockToken = publish.QualityOfService == QualityOfService.AtLeastOnce ? publish.PacketId.ToString() : null;
         }
     }
 }
