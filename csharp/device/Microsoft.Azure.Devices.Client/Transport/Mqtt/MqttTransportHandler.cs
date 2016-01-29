@@ -23,12 +23,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     sealed class MqttTransportHandler : TansportHandlerBase
     {
         const int ProtocolGatewayPort = 8883;
-        
+
         readonly Bootstrap bootstrap;
         readonly IPAddress serverAddress;
         readonly TaskCompletionSource connectCompletion;
         readonly TaskCompletionSource disconnectCompletion;
-        readonly ConcurrentQueue<Message> messageQueue;
+        readonly ConcurrentQueue<MqttMessageReceivedResult> messageQueue;
         readonly Queue<string> completionQueue;
         readonly MqttIotHubAdapterFactory mqttIotHubAdapterFactory;
         readonly QualityOfService qos;
@@ -40,7 +40,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString)
             : this(iotHubConnectionString, new MqttTransportSettings())
         {
-            
+
         }
 
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings)
@@ -48,7 +48,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.connectCompletion = new TaskCompletionSource();
             this.disconnectCompletion = new TaskCompletionSource();
             this.mqttIotHubAdapterFactory = new MqttIotHubAdapterFactory(settings);
-            this.messageQueue = new ConcurrentQueue<Message>();
+            this.messageQueue = new ConcurrentQueue<MqttMessageReceivedResult>();
             this.completionQueue = new Queue<string>();
             this.serverAddress = Dns.GetHostEntry(iotHubConnectionString.HostName).AddressList[0];
             var group = new SingleInstanceEventLoopGroup();
@@ -64,7 +64,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                         TlsHandler.Client(iotHubConnectionString.HostName, null),
                         MqttEncoder.Instance,
                         new MqttDecoder(false, 256 * 1024),
-                        this.mqttIotHubAdapterFactory.Create(this.OnConnected, this.OnDisconnected, this.OnMessageReceived, iotHubConnectionString, settings));
+                        this.mqttIotHubAdapterFactory.Create(
+                            this.OnConnected,
+                            this.OnDisconnected,
+                            this.OnMessageReceived, iotHubConnectionString, settings));
                 }));
 
             this.ScheduleCleanup(async () =>
@@ -73,7 +76,15 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 {
                     this.connectCompletion.SetCanceled();
                 }
+                if (this.channel != null)
+                {
+                    await this.channel.DisconnectAsync();
+                }
                 await group.ShutdownGracefullyAsync();
+                if ((this.disconnectCompletion.Task.Status & TaskStatus.Running) == TaskStatus.Running)
+                {
+                    this.disconnectCompletion.Complete();
+                }
             });
 
         }
@@ -113,7 +124,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
 
             IotHubConnectionString iotHubConnectionString = IotHubConnectionString.Parse(connectionString);
-            
+
             return new MqttTransportHandler(iotHubConnectionString);
         }
 
@@ -135,6 +146,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
             this.ScheduleCleanup(async () =>
             {
+                this.channel.DisconnectAsync();
                 await this.channel.CloseAsync();
             });
 
@@ -143,6 +155,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         protected override async Task OnCloseAsync()
         {
+            await this.channel.WriteAndFlushAsync(DisconnectPacket.Instance);
             await this.cleanupFunc();
             await this.disconnectCompletion.Task;
         }
@@ -192,20 +205,25 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             while (!cancellationToken.IsCancellationRequested)
             {
+                this.channel.Read();
                 await this.receivingSemaphore.WaitAsync(cancellationToken);
-                Message message;
+                MqttMessageReceivedResult receivedResult;
                 lock (this.syncRoot)
                 {
-                    if (!this.messageQueue.TryDequeue(out message))
+                    if (!this.messageQueue.TryDequeue(out receivedResult))
                     {
                         continue;
                     }
-                     if (this.qos == QualityOfService.AtLeastOnce)
+                    if (!receivedResult.Succeed)
                     {
-                        this.completionQueue.Enqueue(message.LockToken);
+                        throw receivedResult.Exception;
+                    }
+                    if (this.qos == QualityOfService.AtLeastOnce)
+                    {
+                        this.completionQueue.Enqueue(receivedResult.Message.LockToken);
                     }
                 }
-                return message;
+                return receivedResult.Message;
             }
             throw new OperationCanceledException("Exit by timeout");
         }
@@ -241,40 +259,40 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             throw new NotSupportedException();
         }
 
-        void OnConnected(MqttIotHubAdapter sender, MqttEventArgs args)
+        void OnConnected(MqttActionResult actionResult)
         {
-            if (args.Succeed)
+            if (actionResult.Succeed)
             {
                 this.connectCompletion.Complete();
             }
             else
             {
-                this.connectCompletion.SetException(args.Exception);
+                this.connectCompletion.SetException(actionResult.Exception);
             }
         }
 
-        void OnDisconnected(MqttIotHubAdapter sender, MqttEventArgs args)
+        void OnDisconnected(MqttActionResult actionResult)
         {
-            if (args.Succeed)
+            if (actionResult.Succeed)
             {
                 this.disconnectCompletion.Complete();
             }
             else
             {
-                this.disconnectCompletion.SetException(args.Exception);
+                this.disconnectCompletion.SetException(actionResult.Exception);
             }
         }
 
-        void OnMessageReceived(MqttIotHubAdapter sender, MqttMessageReceivedEventArgs args)
+        void OnMessageReceived(MqttMessageReceivedResult actionResult)
         {
-            if (args.Succeed)
+            if (actionResult.Succeed)
             {
-                this.messageQueue.Enqueue(args.Message);
+                this.messageQueue.Enqueue(actionResult);
                 this.receivingSemaphore.Release();
             }
             else
             {
-                throw new IotHubException(args.Exception);
+                throw new IotHubException(actionResult.Exception);
             }
         }
 
@@ -293,7 +311,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         }
     }
 
-    class MqttEventArgs
+    class MqttActionResult
     {
         public bool Succeed
         {
@@ -303,7 +321,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         public Exception Exception { get; set; }
     }
 
-    class MqttMessageReceivedEventArgs : MqttEventArgs
+    class MqttMessageReceivedResult : MqttActionResult
     {
         public Message Message { get; set; }
     }

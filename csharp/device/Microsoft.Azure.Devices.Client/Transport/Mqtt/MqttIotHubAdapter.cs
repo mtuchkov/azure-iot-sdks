@@ -22,7 +22,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
     sealed class MqttIotHubAdapter : ChannelHandlerAdapter
     {
-        const string TelemetryTopicFilterFormat = "devices/{0}/messages/devicebound/+";
+        const string TelemetryTopicFilterFormat = "devices/{0}/messages/devicebound/#";
 
         static readonly Action<object> PingServerCallback = PingServer;
         static readonly Action<object> CheckConackTimeoutCallback = CheckConnectionTimeout;
@@ -38,9 +38,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly MqttTransportSettings mqttTransportSettings;
         readonly ITopicNameRouter topicNameRouter;
         readonly IWillMessageProvider willMessageProvider;
-        readonly Action<MqttIotHubAdapter, MqttEventArgs> connectCallback;
-        readonly Action<MqttIotHubAdapter, MqttEventArgs> disconnectCallback;
-        readonly Action<MqttIotHubAdapter, MqttMessageReceivedEventArgs> onMessageReceived;
+        readonly Action<MqttActionResult> connectCallback;
+        readonly Action<MqttActionResult> disconnectCallback;
+        readonly Action<MqttMessageReceivedResult> onMessageReceived;
         readonly ISessionStatePersistenceProvider sessionStatePersistenceProvider;
         
         readonly string deviceId;
@@ -70,9 +70,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             ISessionStatePersistenceProvider sessionStatePersistenceProvider, 
             ITopicNameRouter topicNameRouter, 
             IWillMessageProvider willMessageProvider,
-            Action<MqttIotHubAdapter, MqttEventArgs> connectCallback,
-            Action<MqttIotHubAdapter, MqttEventArgs> disconnectCallback,
-            Action<MqttIotHubAdapter, MqttMessageReceivedEventArgs> onMessageReceived)
+            Action<MqttActionResult> connectCallback,
+            Action<MqttActionResult> disconnectCallback,
+            Action<MqttMessageReceivedResult> onMessageReceived)
         {
             Contract.Requires(deviceId != null);
             Contract.Requires(iotHubHostName != null);
@@ -133,15 +133,16 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
             catch (Exception ex)
             {
-                this.onMessageReceived(this, new MqttMessageReceivedEventArgs { Exception = ex });
+                this.onMessageReceived(new MqttMessageReceivedResult { Exception = ex });
                 return TaskConstants.Completed;
             }
-            this.onMessageReceived(this, new MqttMessageReceivedEventArgs { Message = message });
+            this.onMessageReceived(new MqttMessageReceivedResult { Message = message });
             return TaskConstants.Completed;
         }
 
         Task SendAckAsync(IChannelHandlerContext context, PublishPacket publish)
         {
+            this.ResumeReadingIfNecessary(context);
             return Util.WriteMessageAsync(context, PubAckPacket.InResponseTo(publish), ShutdownOnWriteErrorHandler);
         }
 
@@ -191,6 +192,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             if (message != null)
             {
                 return this.SendMessageAsync(context, message);
+            }
+
+            var packet = data as Packet;
+            if (packet != null)
+            {
+                return Util.WriteMessageAsync(context, packet, ShutdownOnWriteErrorHandler);
             }
 
             throw new InvalidOperationException(string.Format("Unexpected data type: '{0}'", data.GetType().Name));
@@ -284,16 +291,34 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             if (this.keepAliveTimeout.HasValue)
             {
                 this.lastClientActivityTime = DateTime.UtcNow;
-                await context.Channel.EventLoop.ScheduleAsync(PingServerCallback, context, this.pingRequestTimeout);
+                this.KeepConnectionAlive(context);
             }
 
-            await context.Channel.EventLoop.ScheduleAsync(CheckConackTimeoutCallback, context, this.mqttTransportSettings.ConnectArrivalTimeout);
+            this.CheckConnectTimeout(context);
+        }
 
-            string topicFilter = TelemetryTopicFilterFormat.FormatInvariant(this.deviceId);
-            var subscribePacket = new SubscribePacket(GenerateNextPacketId(), new SubscriptionRequest(topicFilter, this.ReceivinQualityOfService));
+        async void KeepConnectionAlive(IChannelHandlerContext context)
+        {
+            try
+            {
+                await context.Channel.EventLoop.ScheduleAsync(PingServerCallback, context, this.pingRequestTimeout);
+            }
+            catch (OperationCanceledException)
+            {
+                
+            }
+        }
 
-            await Util.WriteMessageAsync(context, subscribePacket, ShutdownOnWriteErrorHandler);
-            this.ResumeReadingIfNecessary(context);
+        async void CheckConnectTimeout(IChannelHandlerContext context)
+        {
+            try
+            {
+                await context.Channel.EventLoop.ScheduleAsync(CheckConackTimeoutCallback, context, this.mqttTransportSettings.ConnectArrivalTimeout);
+            }
+            catch (OperationCanceledException)
+            {
+
+            }
         }
 
         static void CheckConnectionTimeout(object state)
@@ -372,9 +397,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 await this.EstablishSessionStateAsync(this.deviceId, this.mqttTransportSettings.CleanSession, packet.SessionPresent);
 
-                this.stateFlags = StateFlags.Connected;
-
-                this.StartReceiving(context);
+                this.stateFlags |= StateFlags.Connected;
+                this.ResumeReadingIfNecessary(context);
             }
             catch (Exception ex)
             {
@@ -384,10 +408,15 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             if (exception != null)
             {
                 ShutdownOnError(context, "CONNECT", exception);
-                this.connectCallback(this, new MqttEventArgs {Exception = exception});
+                this.connectCallback(new MqttActionResult {Exception = exception});
                 return;
             }
-            this.connectCallback(this, new MqttEventArgs());
+            this.connectCallback(new MqttActionResult());
+
+            string topicFilter = TelemetryTopicFilterFormat.FormatInvariant(this.deviceId);
+            var subscribePacket = new SubscribePacket(GenerateNextPacketId(), new SubscriptionRequest(topicFilter, this.ReceivinQualityOfService));
+
+            await Util.WriteMessageAsync(context, subscribePacket, ShutdownOnWriteErrorHandler);
         }
 
         void ProcessSubscribeAck(IChannelHandlerContext context, SubAckPacket packet)
@@ -462,10 +491,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         static void ShutdownOnError(IChannelHandlerContext context, string scope, Exception exception)
         {
             ShutdownOnError(context, scope, exception.ToString());
-            var mqttEventArgs = new MqttEventArgs();
-            mqttEventArgs.Exception = exception;
+            var actionResult = new MqttActionResult();
+            actionResult.Exception = exception;
             var self = (MqttIotHubAdapter)context.Handler;
-            self.disconnectCallback(self, mqttEventArgs);
+            self.disconnectCallback(actionResult);
         }
 
         static void ShutdownOnError(IChannelHandlerContext context, string scope, string exception)
@@ -539,12 +568,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        void StartReceiving(IChannelHandlerContext context)
-        {
-            this.stateFlags |= StateFlags.Receiving;
-            this.ResumeReadingIfNecessary(context);
-        }
-
         bool IsInState(StateFlags stateFlagsToCheck)
         {
             return (this.stateFlags & stateFlagsToCheck) == stateFlagsToCheck;
@@ -611,8 +634,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             NotConnected = 1,
             Connecting = 1 << 1,
             Connected = 1 << 2,
-            Receiving = 1 << 3,
-            Closed = 1 << 4
+            Closed = 1 << 3
         }
 
         class PublishWorkItem

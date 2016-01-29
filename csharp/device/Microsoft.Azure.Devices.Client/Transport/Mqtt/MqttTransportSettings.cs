@@ -21,7 +21,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
     class MqttTransportSettings
     {
-        const bool DefaultCleanSession = true;
+        const bool DefaultCleanSession = false;
         const bool DefaultDeviceReceiveAckCanTimeout = false;
         const bool DefaultHasWill = false;
         const bool DefaultMaxOutboundRetransmissionEnforced = false;
@@ -50,6 +50,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.MaxOutboundRetransmissionEnforced = DefaultMaxOutboundRetransmissionEnforced;
             this.MaxPendingInboundMessages = DefaultMaxPendingInboundMessages;
             this.PublishToServerQoS = DefaultPublishToServerQoS;
+            this.ReceivingQoS = DefaultReceivingQoS;
             this.QoSPropertyName = "mqtt-qos";
             this.RetainPropertyName = "mqtt-retain";
             this.SessionStatePersistenceProvider = new InMemorySessionStateProvider();

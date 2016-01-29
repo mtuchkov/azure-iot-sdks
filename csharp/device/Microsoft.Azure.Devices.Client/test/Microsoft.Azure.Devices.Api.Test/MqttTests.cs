@@ -27,7 +27,7 @@ namespace Microsoft.Azure.Devices.Client.Test
 
         private const string IoTHubName = "acme-mtuchkov2";
         private const string HostSuffix = "private.azure-devices-int.net";
-        private const string DeviceId = "secretdevice";
+        private const string DeviceId = "mt_device6";
         private const string PrimaryKey = "CQN2K33r45/0WeIjpqmErV5EIvX8JZrozt3NEHCEkG8=";
         private const string KeyName = "IotHubAllAccessSasKey";
 
@@ -38,38 +38,38 @@ namespace Microsoft.Azure.Devices.Client.Test
         [TestMethod] 
         public async Task E2ETest()
         {
-            DeviceClient client = DeviceClient.CreateFromConnectionString("HostName=acme-mtuchkov2.private.azure-devices-int.net;SharedAccessKeyName=DeviceSASKey;SharedAccessKey=CQN2K33r45/0WeIjpqmErV5EIvX8JZrozt3NEHCEkG8=;DeviceId=secretdevice", TransportType.Mqtt);
+            DeviceClient client = DeviceClient.CreateFromConnectionString("HostName=acme-mtuchkov2.private.azure-devices-int.net;DeviceId=mt_device6;SharedAccessKey=cdJC8QScl7+RlVsy6PesGDttufvo5HWCAV/Lk9YGk+Y=;", TransportType.Mqtt);
             await client.OpenAsync();
 
-            EventHubClient eventHubClient = CreateEventHubClient();
+            await Task.Delay(3000);
 
-            var offset = await GetCurrentEventHubOffsetAsync(eventHubClient);
-
-            await client.SendEventAsync(new Message(new byte[] { 0, 1, 2, 3, 4, 5 }));
-            await client.SendEventAsync(new Message(new byte[] { 0, 1, 2, 3, 4, 5 }));
-            await client.SendEventAsync(new Message(new byte[] { 0, 1, 2, 3, 4, 5 }));
-            await client.SendEventAsync(new Message(new byte[] { 0, 1, 2, 3, 4, 5 }));
-            await client.SendEventAsync(new Message(new byte[] { 0, 1, 2, 3, 4, 5 }));
-            await client.SendEventAsync(new Message(new byte[] { 0, 1, 2, 3, 4, 5 }));
             await client.SendEventAsync(new Message(new byte[] { 0, 1, 2, 3, 4, 5 }));
             await client.SendEventAsync(new Message(new byte[] { 0, 1, 2, 3, 4, 5 }));
 
             Task t1 = client.SendEventAsync(new Message(new byte[] { 0, 1, 2, 3, 4, 5 }));
             Task t2 = client.SendEventAsync(new Message(new byte[] { 0, 1, 2, 3, 4, 5 }));
             Task t3 = client.SendEventAsync(new Message(new byte[] { 0, 1, 2, 3, 4, 5 }));
-            Task t4 = client.SendEventAsync(new Message(new byte[] { 0, 1, 2, 3, 4, 5 }));
-            Task t5 = client.SendEventAsync(new Message(new byte[] { 0, 1, 2, 3, 4, 5 }));
-            Task t6 = client.SendEventAsync(new Message(new byte[] { 0, 1, 2, 3, 4, 5 }));
 
-            await Task.WhenAll(t1, t2, t3, t4, t5, t6);
+            await Task.WhenAll(t1, t2, t3);
 
-            await ReceiveTelemtryFromEventHubAsync(eventHubClient, offset);
-
-            var serviceClient = ServiceClient.CreateFromConnectionString(GetServiceConnectionString());
+            ServiceClient serviceClient = ServiceClient.CreateFromConnectionString(GetServiceConnectionString());
             await SendCommandsAsync(serviceClient);
 
-            await client.ReceiveAsync(TimeSpan.FromMinutes(1));
-            await client.ReceiveAsync(TimeSpan.FromMinutes(1));
+            while (true)
+            {
+                await ReceiveNextMessageAsync(client);
+            }
+            
+            await client.CloseAsync();
+        }
+
+        static async Task ReceiveNextMessageAsync(DeviceClient client)
+        {
+            Message message = await client.ReceiveAsync(TimeSpan.FromMinutes(1));
+            if (message.LockToken != null)
+            {
+                await client.CompleteAsync(message.LockToken);
+            }
         }
 
         private static async Task SendCommandsAsync(ServiceClient serviceClient)
@@ -140,7 +140,7 @@ namespace Microsoft.Azure.Devices.Client.Test
         {
             var connectionStringbuilder = new ServiceBusConnectionStringBuilder();
             connectionStringbuilder.Endpoints.Add(
-                new Uri("sb://mtuchkov2dhrp-iothub-ns-acme-mtuch-4-8e01747244.servicebus.windows.net/"));
+                new Uri("sb://mtuchkov2dhrp-iothub-ns-acme-mtuch-14-6e1d659f0f.servicebus.windows.net/"));
             connectionStringbuilder.SharedAccessKeyName = "IotHubAllAccessSasKey";
             connectionStringbuilder.SharedAccessKey = "CQN2K33r45/0WeIjpqmErV5EIvX8JZrozt3NEHCEkG8=";
             var eventHubName = "acme-mtuchkov2";
