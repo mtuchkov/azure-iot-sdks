@@ -8,6 +8,7 @@ namespace Microsoft.Azure.Devices.Client
     using System.Text.RegularExpressions;
     using Microsoft.Azure.Devices.Client.Extensions;
     using Microsoft.Azure.Devices.Client.Transport;
+
     // C# using aliases cannot name an unbound generic type declaration without supplying type arguments
     // Therefore, define a separate alias for each type argument
 #if WINDOWS_UWP

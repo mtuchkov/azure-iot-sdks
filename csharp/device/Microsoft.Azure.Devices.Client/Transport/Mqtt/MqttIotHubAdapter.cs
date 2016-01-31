@@ -48,8 +48,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly string password;
         readonly TimeSpan? keepAliveTimeout;
         readonly TimeSpan pingRequestTimeout;
-        QualityOfService maxSupportedQos;
-        DateTime lastClientActivityTime;
         readonly Dictionary<string, string> sessionContext;
 
         readonly SimpleWorkQueue<PublishWorkItem> serviceBoundPublishProcessor;
@@ -57,7 +55,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         
         readonly SimpleWorkQueue<PublishPacket> deviceBoundPublishProcessor;
         readonly OrderedTwoPhaseWorkQueue<int, PublishPacket> deviceBoundPubAckProcessor;
-        
+
+        QualityOfService maxSupportedQos;
+        DateTime lastClientActivityTime;
         ISessionState sessionState;
 
         int InboundBacklogSize { get { return this.deviceBoundPublishProcessor.BacklogSize + this.deviceBoundPubAckProcessor.BacklogSize; } }

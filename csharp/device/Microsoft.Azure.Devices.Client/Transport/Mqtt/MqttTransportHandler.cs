@@ -17,6 +17,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using DotNetty.Transport.Bootstrapping;
     using DotNetty.Transport.Channels;
     using DotNetty.Transport.Channels.Sockets;
+    using Microsoft.Azure.Devices.Client.Common;
     using Microsoft.Azure.Devices.Client.Exceptions;
     using Microsoft.Azure.Devices.Client.Extensions;
 
@@ -45,6 +46,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings)
         {
+            this.ScheduleCleanup(() =>
+            {
+                this.disconnectCompletion.Complete();
+                return TaskConstants.Completed;
+            });
             this.connectCompletion = new TaskCompletionSource();
             this.disconnectCompletion = new TaskCompletionSource();
             this.mqttIotHubAdapterFactory = new MqttIotHubAdapterFactory(settings);
@@ -76,15 +82,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 {
                     this.connectCompletion.SetCanceled();
                 }
-                if (this.channel != null)
-                {
-                    await this.channel.DisconnectAsync();
-                }
                 await group.ShutdownGracefullyAsync();
-                if ((this.disconnectCompletion.Task.Status & TaskStatus.Running) == TaskStatus.Running)
-                {
-                    this.disconnectCompletion.Complete();
-                }
             });
 
         }
@@ -146,7 +144,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
             this.ScheduleCleanup(async () =>
             {
-                this.channel.DisconnectAsync();
+                await this.channel.WriteAndFlushAsync(DisconnectPacket.Instance);
+                await this.channel.DisconnectAsync();
                 await this.channel.CloseAsync();
             });
 
@@ -155,9 +154,14 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         protected override async Task OnCloseAsync()
         {
-            await this.channel.WriteAndFlushAsync(DisconnectPacket.Instance);
-            await this.cleanupFunc();
-            await this.disconnectCompletion.Task;
+            try
+            {
+                await this.cleanupFunc();
+            }
+            catch (Exception ex)
+            {
+                this.disconnectCompletion.SetException(ex);
+            }
         }
 
         protected override Task OnSendEventAsync(Message message)
@@ -205,7 +209,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                this.channel.Read();
                 await this.receivingSemaphore.WaitAsync(cancellationToken);
                 MqttMessageReceivedResult receivedResult;
                 lock (this.syncRoot)
