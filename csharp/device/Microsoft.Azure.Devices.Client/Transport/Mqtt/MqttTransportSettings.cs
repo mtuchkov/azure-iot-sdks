@@ -7,7 +7,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using System.Configuration;
     using System.Xml;
     using DotNetty.Codecs.Mqtt.Packets;
-    using Microsoft.Azure.Devices.Client.Transport.Mqtt.Routing;
     using Microsoft.Azure.Devices.Client.Transport.Mqtt.Store;
 
     public class MqttConfigurationHandler : IConfigurationSectionHandler
@@ -54,7 +53,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.QoSPropertyName = "mqtt-qos";
             this.RetainPropertyName = "mqtt-retain";
             this.SessionStatePersistenceProvider = new InMemorySessionStateProvider();
-            this.TopicNameRouter = new TopicNameRouter();
             this.WillMessageProvider = null;
         }
 
@@ -77,7 +75,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.QoSPropertyName = parent.GetAttribute("qoSPropertyName");
             this.RetainPropertyName = "mqtt-retain";
             this.SessionStatePersistenceProvider = new InMemorySessionStateProvider(); // this.CreateImplementation<ISessionStatePersistenceProvider>(configuration.SessionStatePersistenceProviderTypeName, typeof(InMemorySessionStateProvider));
-            this.TopicNameRouter = new TopicNameRouter(); //this.CreateImplementation<ITopicNameRouter>(configuration.TopicNameRouterTypeName, typeof(TopicNameRouter));
             this.WillMessageProvider = null;// this.CreateImplementation<IWillMessageProvider>(configuration.WillMessageProviderTypeName, typeof(WillMessageProvider));
         }
 

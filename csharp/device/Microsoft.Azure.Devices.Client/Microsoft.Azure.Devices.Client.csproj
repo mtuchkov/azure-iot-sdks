@@ -113,6 +113,7 @@
   <ItemGroup>
     <Compile Include="Common\Exceptions\IotHubClientException.cs" />
     <Compile Include="Common\TaskConstants.cs" />
+    <Compile Include="Common\UrlEncodedDictionarySerializer.cs" />
     <Compile Include="Transport\AmqpClientHelper.cs" />
     <Compile Include="Common\ActionItem.cs" />
     <Compile Include="Common\Amqp\ClientWebSocketTransport.cs" />
@@ -249,7 +250,6 @@
     <Compile Include="Common\Ticks.cs" />
     <Compile Include="Common\TimeoutHelper.cs" />
     <Compile Include="DotNetHelpers.cs" />
-    <Compile Include="Transport\Mqtt\Routing\TopicNameRouter.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="35MSSharedLib1024.snk" />

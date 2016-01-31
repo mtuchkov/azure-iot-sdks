@@ -173,5 +173,32 @@ namespace Microsoft.Azure.Devices.Client.Extensions
         {
             return new string(value.Where(c => !char.IsWhiteSpace(c)).ToArray());
         }
+
+        public static int NthIndexOf(this string str, char value, int startIndex, int n)
+        {
+            if (str == null)
+            {
+                throw new ArgumentNullException("str");
+            }
+            if (startIndex < 0)
+            {
+                throw new ArgumentOutOfRangeException("startIndex");
+            }
+            if (n <= 0)
+            {
+                throw new ArgumentOutOfRangeException("n");
+            }
+
+            for (int i = 0; i < n; i++)
+            {
+                if (startIndex >= str.Length || (startIndex = str.IndexOf(value, startIndex)) < 0)
+                {
+                    return -1;
+                }
+                startIndex++;
+            }
+            
+            return startIndex;
+        }
     }
 }

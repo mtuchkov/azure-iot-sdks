@@ -83,6 +83,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                     this.connectCompletion.SetCanceled();
                 }
                 await group.ShutdownGracefullyAsync();
+                this.disconnectCompletion.TryComplete();
             });
 
         }
@@ -140,13 +141,15 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 {
                     throw;
                 }
-                this.connectCompletion.SetException(ex);
+                this.connectCompletion.TrySetException(ex);
             }
             this.ScheduleCleanup(async () =>
             {
-                await this.channel.WriteAndFlushAsync(DisconnectPacket.Instance);
-                await this.channel.DisconnectAsync();
-                await this.channel.CloseAsync();
+                if (!this.disconnectCompletion.Task.IsFaulted)
+                {
+                    await this.channel.DisconnectAsync();
+                    await this.channel.CloseAsync();
+                }
             });
 
             await this.connectCompletion.Task;
@@ -160,8 +163,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
             catch (Exception ex)
             {
-                this.disconnectCompletion.SetException(ex);
+                this.disconnectCompletion.TrySetException(ex);
             }
+            await this.disconnectCompletion.Task;
         }
 
         protected override Task OnSendEventAsync(Message message)
