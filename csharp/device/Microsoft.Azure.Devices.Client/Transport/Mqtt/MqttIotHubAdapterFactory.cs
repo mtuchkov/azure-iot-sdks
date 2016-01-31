@@ -32,7 +32,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 iotHubConnectionString.GetPassword(),
                 mqttTransportSettings,
                 persistanceProvider,
-                topicNameRouter,
                 willMessageProvider,
                 onConnected,
                 onDisconnected,

@@ -115,6 +115,7 @@
     <Compile Include="AmqpClientHelper.cs" />
     <Compile Include="AmqpTransportSettings.cs" />
     <Compile Include="Common\TaskConstants.cs" />
+    <Compile Include="Common\UrlEncodedDictionarySerializer.cs" />
     <Compile Include="Transport\AmqpClientHelper.cs" />
     <Compile Include="Common\ActionItem.cs" />
     <Compile Include="Common\Amqp\ClientWebSocketTransport.cs" />

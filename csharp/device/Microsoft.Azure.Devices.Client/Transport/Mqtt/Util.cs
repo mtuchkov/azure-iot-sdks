@@ -11,10 +11,61 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using DotNetty.Buffers;
     using DotNetty.Codecs.Mqtt.Packets;
     using DotNetty.Transport.Channels;
+    using Microsoft.Azure.Amqp;
+    using Microsoft.Azure.Devices.Client.Common;
+    using Microsoft.Azure.Devices.Client.Extensions;
     using Microsoft.Azure.Devices.Client.Transport.Mqtt.Store;
 
     static class Util
     {
+        static class IotHubWirePropertyNames
+        {
+            public const string AbsoluteExpiryTime = "$.exp";
+            public const string CorrelationId = "$.cid";
+            public const string MessageId = "$.mid";
+            public const string To = "$.to";
+            public const string UserId = "$.uid";
+        }
+
+        static class MessageSystemPropertyNames
+        {
+            public const string MessageId = "message-id";
+
+            public const string To = "to";
+
+            public const string ExpiryTimeUtc = "absolute-expiry-time";
+
+            public const string CorrelationId = "correlation-id";
+
+            public const string UserId = "user-id";
+
+            public const string Operation = "iothub-operation";
+
+            public const string Ack = "iothub-ack";
+        }
+
+        static readonly Dictionary<string, string> FromSystemPropertiesMap = new Dictionary<string, string>
+        {
+            {IotHubWirePropertyNames.AbsoluteExpiryTime, MessageSystemPropertyNames.ExpiryTimeUtc},
+            {IotHubWirePropertyNames.CorrelationId, MessageSystemPropertyNames.CorrelationId},
+            {IotHubWirePropertyNames.MessageId, MessageSystemPropertyNames.MessageId},
+            {IotHubWirePropertyNames.To, MessageSystemPropertyNames.To},
+            {IotHubWirePropertyNames.UserId, MessageSystemPropertyNames.UserId},
+            {MessageSystemPropertyNames.Operation, MessageSystemPropertyNames.Operation},
+            {MessageSystemPropertyNames.Ack, MessageSystemPropertyNames.Ack}
+        };
+
+        static readonly Dictionary<string, string> ToSystemPropertiesMap = new Dictionary<string, string>
+        {
+            {MessageSystemPropertyNames.ExpiryTimeUtc, IotHubWirePropertyNames.AbsoluteExpiryTime},
+            {MessageSystemPropertyNames.CorrelationId, IotHubWirePropertyNames.CorrelationId},
+            {MessageSystemPropertyNames.MessageId, IotHubWirePropertyNames.MessageId},
+            {MessageSystemPropertyNames.To, IotHubWirePropertyNames.To},
+            {MessageSystemPropertyNames.UserId, IotHubWirePropertyNames.UserId},
+            {MessageSystemPropertyNames.Operation, MessageSystemPropertyNames.Operation},
+            {MessageSystemPropertyNames.Ack, MessageSystemPropertyNames.Ack}
+        };
+
         const char SegmentSeparatorChar = '/';
         const char SingleSegmentWildcardChar = '+';
         const char MultiSegmentWildcardChar = '#';
@@ -126,7 +177,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             bool duplicate = message.DeliveryCount > 0;
 
             var packet = new PublishPacket(qos, duplicate, false);
-            packet.TopicName = topicName;
+            packet.TopicName = PopulateMessagePropertiesFromMessage(topicName, message);
             if (qos > QualityOfService.AtMostOnce)
             {
                 int packetId = unchecked((ushort)message.SequenceNumber);
@@ -234,6 +285,48 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         public static void PopulateMessagePropertiesFromPacket(Message message, PublishPacket publish)
         {
             message.LockToken = publish.QualityOfService == QualityOfService.AtLeastOnce ? publish.PacketId.ToString() : null;
+            Dictionary<string, string> properties = UrlEncodedDictionarySerializer.Deserialize(publish.TopicName, publish.TopicName.NthIndexOf('/', 0, 4));
+            foreach (KeyValuePair<string, string> property in properties)
+            {
+                string propertyName;
+                if (ToSystemPropertiesMap.TryGetValue(property.Key, out propertyName))
+                {
+                    message.SystemProperties[propertyName] = property.Value;
+                }
+                else
+                {
+                    message.Properties[property.Key] = property.Value;
+                }
+            }
+        }
+
+        static string PopulateMessagePropertiesFromMessage(string topicName, Message message)
+        {
+            var systemProperties = new Dictionary<string, string>();
+            foreach (KeyValuePair<string, object> property in message.SystemProperties)
+            {
+                string propertyName;
+                if (FromSystemPropertiesMap.TryGetValue(property.Key, out propertyName))
+                {
+                    systemProperties[propertyName] = ConvertToString(property.Value);
+                }
+            }
+            string properties = UrlEncodedDictionarySerializer.Serialize(new ReadOnlyMergeDictionary<string, string>(systemProperties, message.Properties));
+
+            return topicName.EndsWith("/", StringComparison.Ordinal) ? topicName + properties : topicName + "/" + properties;
+        }
+
+        static string ConvertToString(object systemProperty)
+        {
+            if (systemProperty is string)
+            {
+                return (string)systemProperty;
+            }
+            if (systemProperty is ArraySegment<byte>)
+            {
+                return ((ArraySegment<byte>)systemProperty).GetString();
+            }
+            return systemProperty?.ToString();
         }
     }
 }
