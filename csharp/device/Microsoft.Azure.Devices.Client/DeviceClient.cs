@@ -238,7 +238,7 @@ namespace Microsoft.Azure.Devices.Client
 
             return CreateFromConnectionString(connectionString + ";" + DeviceId + "=" + deviceId, transportType);
         }
-        
+
 #if !WINDOWS_UWP
         /// <summary>
         /// Create DeviceClient from the specified connection string using a prioritized list of transports
@@ -417,7 +417,7 @@ namespace Microsoft.Azure.Devices.Client
 
                     await this.impl.CompleteAsync(lockToken).AsTaskOrAsyncOp();
                 });
-            }
+        }
             else
             {
 #endif

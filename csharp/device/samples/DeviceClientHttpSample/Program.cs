@@ -13,7 +13,7 @@ namespace Microsoft.Azure.Devices.Client.Samples
         // String containing Hostname, Device Id & Device Key in one of the following formats:
         //  "HostName=<iothub_host_name>;DeviceId=<device_id>;SharedAccessKey=<device_key>"
         //  "HostName=<iothub_host_name>;CredentialType=SharedAccessSignature;DeviceId=<device_id>;SharedAccessSignature=SharedAccessSignature sr=<iot_host>/devices/<device_id>&sig=<token>&se=<expiry_time>";
-        private const string DeviceConnectionString = "HostName=acme-mtuchkov2.private.azure-devices-int.net;SharedAccessKeyName=DeviceSASKey;SharedAccessKey=CQN2K33r45/0WeIjpqmErV5EIvX8JZrozt3NEHCEkG8=;DeviceId=secretdevice";
+        private const string DeviceConnectionString = "HostName=acme-mtuchkov2.private.azure-devices-int.net;DeviceId=mt_device6;SharedAccessKey=cdJC8QScl7+RlVsy6PesGDttufvo5HWCAV/Lk9YGk+Y=;";
 
         private static int MESSAGE_COUNT = 5;
 
