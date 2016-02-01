@@ -22,6 +22,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             public TWorkId Id { get; set; }
         }
+
         readonly Func<TWork, TWorkId> getWorkId;
         readonly Func<IChannelHandlerContext, TWork, Task> completeWork;
         readonly Queue<IncompleteWorkItem> incompleteQueue = new Queue<IncompleteWorkItem>();

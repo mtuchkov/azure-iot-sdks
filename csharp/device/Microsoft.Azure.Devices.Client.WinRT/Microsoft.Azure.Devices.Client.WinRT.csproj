@@ -212,8 +212,8 @@
     <Compile Include="..\Microsoft.Azure.Devices.Client\Transport\IHttpClientHelper.cs">
       <Link>IHttpClientHelper.cs</Link>
     </Compile>
-    <Compile Include="..\Microsoft.Azure.Devices.Client\Transport\TansportHandlerBase.cs">
-      <Link>TansportHandlerBase.cs</Link>
+    <Compile Include="..\Microsoft.Azure.Devices.Client\Transport\TransportHandlerBase.cs">
+      <Link>TransportHandlerBase.cs</Link>
     </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

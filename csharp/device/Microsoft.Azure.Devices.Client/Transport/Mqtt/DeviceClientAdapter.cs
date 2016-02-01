@@ -15,19 +15,19 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             this.connectTaskCompletionSource = new TaskCompletionSource();
             this.ConnectAsync = this.connectTaskCompletionSource.Task;
-            this.DisconnectAsync = this.connectTaskCompletionSource.Task;
-           
+            this.DisconnectAsync = this.disconnectTaskCompletionSource.Task;
         }
-        public Task ConnectAsync { get; set; }
 
-        public Task DisconnectAsync { get; set; }
+        public Task ConnectAsync { get; private set; }
+
+        public Task DisconnectAsync { get; private set; }
 
         void OnDisconnected()
         {
             this.disconnectTaskCompletionSource.Complete();
         }
 
-        void OnCnnected()
+        void OnConnected()
         {
             this.connectTaskCompletionSource.Complete();
         }

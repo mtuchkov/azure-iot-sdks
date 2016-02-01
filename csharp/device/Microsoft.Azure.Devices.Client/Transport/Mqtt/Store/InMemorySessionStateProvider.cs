@@ -43,9 +43,4 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt.Store
             return TaskConstants.Completed;
         }
     }
-
-    // ---------------------------------------------------------------
-    // Copyright (c) Microsoft Corporation. All rights reserved.
-    // ---------------------------------------------------------------
-    // 
 }

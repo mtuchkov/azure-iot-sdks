@@ -13,7 +13,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
     using Microsoft.Azure.Devices.Client.Exceptions;
     using Microsoft.Azure.Devices.Client.Extensions;
 
-    sealed class AmqpTransportHandler : TansportHandlerBase
+    sealed class AmqpTransportHandler : TransportHandlerBase
     {
         const uint DefaultPrefetchCount = 50;
         static readonly IotHubConnectionCache connectionCache = new IotHubConnectionCache(AccessRights.DeviceConnect);

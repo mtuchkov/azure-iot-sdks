@@ -6,6 +6,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using System;
     using System.Collections.Generic;
     using System.Diagnostics.Contracts;
+    using System.Globalization;
     using System.IO;
     using System.Threading.Tasks;
     using DotNetty.Buffers;
@@ -44,7 +45,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             public const string Ack = "iothub-ack";
         }
 
-        static readonly Dictionary<string, string> FromSystemPropertiesMap = new Dictionary<string, string>
+        static readonly Dictionary<string, string> ToSystemPropertiesMap = new Dictionary<string, string>
         {
             {IotHubWirePropertyNames.AbsoluteExpiryTime, MessageSystemPropertyNames.ExpiryTimeUtc},
             {IotHubWirePropertyNames.CorrelationId, MessageSystemPropertyNames.CorrelationId},
@@ -55,7 +56,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {MessageSystemPropertyNames.Ack, MessageSystemPropertyNames.Ack}
         };
 
-        static readonly Dictionary<string, string> ToSystemPropertiesMap = new Dictionary<string, string>
+        static readonly Dictionary<string, string> FromSystemPropertiesMap = new Dictionary<string, string>
         {
             {MessageSystemPropertyNames.ExpiryTimeUtc, IotHubWirePropertyNames.AbsoluteExpiryTime},
             {MessageSystemPropertyNames.CorrelationId, IotHubWirePropertyNames.CorrelationId},
@@ -71,6 +72,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         const char MultiSegmentWildcardChar = '#';
         static readonly char[] WildcardChars = { MultiSegmentWildcardChar, SingleSegmentWildcardChar };
         const string IotHubTrueString = "true";
+        const string SegmentSeparator = "/";
 
         public static bool CheckTopicFilterMatch(string topicName, string topicFilter)
         {
@@ -291,7 +293,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 string propertyName;
                 if (ToSystemPropertiesMap.TryGetValue(property.Key, out propertyName))
                 {
-                    message.SystemProperties[propertyName] = property.Value;
+                    message.SystemProperties[propertyName] = ConvertToSystemProperty(property);
                 }
                 else
                 {
@@ -308,25 +310,41 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 string propertyName;
                 if (FromSystemPropertiesMap.TryGetValue(property.Key, out propertyName))
                 {
-                    systemProperties[propertyName] = ConvertToString(property.Value);
+                    systemProperties[propertyName] = ConvertFromSystemProperties(property.Value);
                 }
             }
             string properties = UrlEncodedDictionarySerializer.Serialize(new ReadOnlyMergeDictionary<string, string>(systemProperties, message.Properties));
 
-            return topicName.EndsWith("/", StringComparison.Ordinal) ? topicName + properties : topicName + "/" + properties;
+            return topicName.EndsWith(SegmentSeparator, StringComparison.Ordinal) ? topicName + properties + SegmentSeparator : topicName + SegmentSeparator + properties;
         }
-
-        static string ConvertToString(object systemProperty)
+        static string ConvertFromSystemProperties(object systemProperty)
         {
             if (systemProperty is string)
             {
                 return (string)systemProperty;
             }
-            if (systemProperty is ArraySegment<byte>)
+            if (systemProperty is DateTime)
             {
-                return ((ArraySegment<byte>)systemProperty).GetString();
+                return ((DateTime)systemProperty).ToString("o", CultureInfo.InvariantCulture);
             }
             return systemProperty?.ToString();
+        }
+
+        static object ConvertToSystemProperty(KeyValuePair<string, string> property)
+        {
+            if (string.IsNullOrEmpty(property.Value))
+            {
+                return property.Value;
+            }
+            if (property.Key == IotHubWirePropertyNames.AbsoluteExpiryTime)
+            {
+                return DateTime.ParseExact(property.Value, "o", CultureInfo.InvariantCulture);
+            }
+            if (property.Key == MessageSystemPropertyNames.Ack)
+            {
+                return (DeliveryAcknowledgement)Enum.Parse(typeof(DeliveryAcknowledgement), property.Value, true);
+            }
+            return property.Value;
         }
     }
 }
