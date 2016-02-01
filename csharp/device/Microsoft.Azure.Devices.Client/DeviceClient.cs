@@ -56,9 +56,9 @@ namespace Microsoft.Azure.Devices.Client
 
         static readonly RegexOptions regexOptions = RegexOptions.Compiled | RegexOptions.IgnoreCase;
         static readonly Regex DeviceIdParameterRegex = new Regex(DeviceIdParameterPattern, regexOptions);
-        readonly TansportHandlerBase impl;
+        readonly TransportHandlerBase impl;
 
-        DeviceClient(TansportHandlerBase impl)
+        DeviceClient(TransportHandlerBase impl)
         {
             this.impl = impl;
         }

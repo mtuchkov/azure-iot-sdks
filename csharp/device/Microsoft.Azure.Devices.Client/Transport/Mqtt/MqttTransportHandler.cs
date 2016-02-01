@@ -21,7 +21,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using Microsoft.Azure.Devices.Client.Exceptions;
     using Microsoft.Azure.Devices.Client.Extensions;
 
-    sealed class MqttTransportHandler : TansportHandlerBase
+    sealed class MqttTransportHandler : TransportHandlerBase
     {
         const int ProtocolGatewayPort = 8883;
 
@@ -33,10 +33,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly Queue<string> completionQueue;
         readonly MqttIotHubAdapterFactory mqttIotHubAdapterFactory;
         readonly QualityOfService qos;
-        Func<Task> cleanupFunc;
-        IChannel channel;
         readonly object syncRoot = new object();
         readonly SemaphoreSlim receivingSemaphore = new SemaphoreSlim(0);
+
+        Func<Task> cleanupFunc;
+        IChannel channel;
 
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString)
             : this(iotHubConnectionString, new MqttTransportSettings())
@@ -46,11 +47,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings)
         {
-            this.ScheduleCleanup(() =>
-            {
-                this.disconnectCompletion.Complete();
-                return TaskConstants.Completed;
-            });
             this.connectCompletion = new TaskCompletionSource();
             this.disconnectCompletion = new TaskCompletionSource();
             this.mqttIotHubAdapterFactory = new MqttIotHubAdapterFactory(settings);
@@ -80,7 +76,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 if (!this.connectCompletion.Task.IsCompleted)
                 {
-                    this.connectCompletion.SetCanceled();
+                    this.connectCompletion.TrySetCanceled();
                 }
                 await group.ShutdownGracefullyAsync();
                 this.disconnectCompletion.TryComplete();
@@ -147,7 +143,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 if (!this.disconnectCompletion.Task.IsFaulted)
                 {
-                    await this.channel.DisconnectAsync();
+                    await this.channel.WriteAsync(DisconnectPacket.Instance);
                     await this.channel.CloseAsync();
                 }
             });
@@ -211,8 +207,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         async Task<Message> PeekAsync(CancellationToken cancellationToken)
         {
-            while (!cancellationToken.IsCancellationRequested)
+            while (true)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 await this.receivingSemaphore.WaitAsync(cancellationToken);
                 MqttMessageReceivedResult receivedResult;
                 lock (this.syncRoot)
@@ -232,10 +229,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 }
                 return receivedResult.Message;
             }
-            throw new OperationCanceledException("Exit by timeout");
         }
 
-        protected override async Task OnCompleteAsync(string lockToken)
+        protected override Task OnCompleteAsync(string lockToken)
         {
             if (this.qos == QualityOfService.AtMostOnce)
             {
@@ -244,6 +240,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             lock (this.syncRoot)
             {
+                if (this.completionQueue.Count == 0)
+                {
+                    throw new InvalidOperationException("Unknown lock token.");
+                }
                 if (this.completionQueue.Peek() == lockToken)
                 {
                     this.completionQueue.Dequeue();
@@ -253,28 +253,28 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                     throw new InvalidOperationException("Client MUST send PUBACK packets in the order in which the corresponding PUBLISH packets were received (QoS 1 messages) per [MQTT-4.6.0-2]");
                 }
             }
-            await this.channel.WriteAndFlushAsync(lockToken);
+            return this.channel.WriteAndFlushAsync(lockToken);
         }
 
         protected override Task OnAbandonAsync(string lockToken)
         {
-            throw new NotSupportedException();
+            throw new NotSupportedException("MQTT protocol does not support this operation");
         }
 
         protected override Task OnRejectAsync(string lockToken)
         {
-            throw new NotSupportedException();
+            throw new NotSupportedException("MQTT protocol does not support this operation");
         }
 
         void OnConnected(MqttActionResult actionResult)
         {
             if (actionResult.Succeed)
             {
-                this.connectCompletion.Complete();
+                this.connectCompletion.TryComplete();
             }
             else
             {
-                this.connectCompletion.SetException(actionResult.Exception);
+                this.connectCompletion.TrySetException(actionResult.Exception);
             }
         }
 
@@ -282,12 +282,14 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             if (actionResult.Succeed)
             {
-                this.disconnectCompletion.Complete();
+                this.disconnectCompletion.TryComplete();
             }
             else
             {
-                this.disconnectCompletion.SetException(actionResult.Exception);
+                this.disconnectCompletion.TrySetException(actionResult.Exception);
             }
+
+            this.receivingSemaphore.Dispose();
         }
 
         void OnMessageReceived(MqttMessageReceivedResult actionResult)
@@ -308,12 +310,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             Func<Task> currentCleanupFunc = this.cleanupFunc;
             this.cleanupFunc = async () =>
             {
+                await cleanupTask();
+
                 if (currentCleanupFunc != null)
                 {
                     await currentCleanupFunc();
                 }
-
-                await cleanupTask();
             };
         }
     }

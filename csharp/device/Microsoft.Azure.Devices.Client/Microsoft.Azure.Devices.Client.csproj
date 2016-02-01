@@ -180,16 +180,16 @@
     <Compile Include="Common\HashCode.cs" />
     <Compile Include="Transport\HttpClientHelper.cs" />
     <Compile Include="Transport\Mqtt\DeviceClientAdapter.cs" />
+    <Compile Include="Transport\Mqtt\MqttConfigurationHandler.cs" />
     <Compile Include="Transport\Mqtt\OrderedTwoPhaseWorkQueue.cs" />
+    <Compile Include="Transport\Mqtt\SettingsProviderExtensions.cs" />
     <Compile Include="Transport\Mqtt\SimpleWorkQueue.cs" />
     <Compile Include="Transport\Mqtt\ISessionContextProvider.cs" />
     <Compile Include="Transport\Mqtt\ISettingsProvider.cs" />
-    <Compile Include="Transport\Mqtt\ITopicNameRouter.cs" />
     <Compile Include="Transport\Mqtt\IWillMessageProvider.cs" />
     <Compile Include="Transport\Mqtt\MqttIotHubAdapterFactory.cs" />
     <Compile Include="Transport\Mqtt\ReadOnlyByteBufferStream.cs" />
     <Compile Include="Transport\Mqtt\RouteDestinationType.cs" />
-    <Compile Include="Transport\Mqtt\Routing\InboundRouteDefinition.cs" />
     <Compile Include="Transport\Mqtt\ReadOnlyMergeDictionary.cs" />
     <Compile Include="Transport\Mqtt\SessionContextProvider.cs" />
     <Compile Include="Transport\Mqtt\Store\InMemorySessionStateProvider.cs" />
@@ -229,13 +229,11 @@
     <Compile Include="Transport\Mqtt\MqttTransportSettings.cs" />
     <Compile Include="Transport\Mqtt\Store\SessionState.cs" />
     <Compile Include="Transport\Mqtt\Store\Subscription.cs" />
-    <Compile Include="Transport\Mqtt\Routing\OutboundRouteDefinition.cs" />
-    <Compile Include="Transport\Mqtt\Routing\RoutingConfiguration.cs" />
     <Compile Include="Transport\Mqtt\SingleInstanceEventLoopGroup.cs" />
     <Compile Include="Transport\Mqtt\TaskExtensions.cs" />
     <Compile Include="Transport\Mqtt\Util.cs" />
     <Compile Include="Transport\Mqtt\WillMessageProvider.cs" />
-    <Compile Include="Transport\TansportHandlerBase.cs" />
+    <Compile Include="Transport\TransportHandlerBase.cs" />
     <Compile Include="Common\Security\SecurityConstants.cs" />
     <Compile Include="Common\Security\SecurityHelper.cs" />
     <Compile Include="Common\Security\StringValidationHelper.cs" />
@@ -267,6 +265,9 @@
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
     </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Transport\Mqtt\Routing\" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

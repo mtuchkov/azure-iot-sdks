@@ -4,19 +4,9 @@
 namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 {
     using System;
-    using System.Configuration;
     using System.Xml;
     using DotNetty.Codecs.Mqtt.Packets;
     using Microsoft.Azure.Devices.Client.Transport.Mqtt.Store;
-
-    public class MqttConfigurationHandler : IConfigurationSectionHandler
-    {
-        public object Create(object parent, object configContext, XmlNode section)
-        {
-            var configuration = new MqttTransportSettings((XmlElement)section);
-            return configuration;
-        }
-    }
 
     class MqttTransportSettings
     {
@@ -36,16 +26,13 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         public MqttTransportSettings()
         {
-            this.MaxPendingOutboundMessages = DefaultMaxPendingOutboundMessages;
             this.CleanSession = DefaultCleanSession;
             this.ConnectArrivalTimeout = DefaultConnectArrivalTimeout;
-            this.MaxKeepAliveTimeout = DefaultMaxKeepAliveTimeout;
             this.DeviceReceiveAckCanTimeout = DefaultDeviceReceiveAckCanTimeout;
             this.DeviceReceiveAckTimeout = DefaultDeviceReceiveAckTimeout;
             this.DupPropertyName = "mqtt-dup";
             this.HasWill = DefaultHasWill;
             this.KeepAliveInSeconds = DefaultKeepAliveInSeconds;
-            this.MaxOutboundRetransmissionCount = DefaultMaxOutboundRetransmissionCount;
             this.MaxOutboundRetransmissionEnforced = DefaultMaxOutboundRetransmissionEnforced;
             this.MaxPendingInboundMessages = DefaultMaxPendingInboundMessages;
             this.PublishToServerQoS = DefaultPublishToServerQoS;
@@ -65,10 +52,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.DupPropertyName = parent.GetAttribute("dupPropertyName");
             this.HasWill = this.GetBoolean(parent, "hasWill", DefaultHasWill);
             this.KeepAliveInSeconds = this.GetInteger(parent, "keepAliveInSeconds", DefaultKeepAliveInSeconds);
-            this.MaxKeepAliveTimeout = this.GetTimeSpan(parent, "maxKeepAliveTimeout", DefaultMaxKeepAliveTimeout);
-            this.MaxOutboundRetransmissionCount = this.GetULong(parent, "maxOutboundRetransmissionCount", DefaultMaxOutboundRetransmissionCount);
             this.MaxOutboundRetransmissionEnforced = this.GetBoolean(parent, "defaultMaxOutboundRetransmissionEnforced", DefaultMaxOutboundRetransmissionEnforced);
-            this.MaxPendingOutboundMessages = this.GetInteger(parent, "maxPendingOutboundMessages", DefaultMaxPendingOutboundMessages);
             this.MaxPendingInboundMessages = this.GetInteger(parent, "maxPendingInboundMessages", DefaultMaxPendingInboundMessages);
             this.PublishToServerQoS = this.GetEnum(parent, "publishToServerQoS", DefaultPublishToServerQoS);
             this.ReceivingQoS = this.GetEnum(parent, "receivingQoS", DefaultReceivingQoS);
@@ -82,8 +66,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         public TimeSpan DeviceReceiveAckTimeout { get; set; }
 
-        public TimeSpan MaxKeepAliveTimeout { get; set; }
-
         public QualityOfService PublishToServerQoS { get; set; }
 
         public QualityOfService ReceivingQoS { get; set; }
@@ -93,10 +75,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         public string DupPropertyName { get; set; }
 
         public string QoSPropertyName { get; set; }
-
-        public int MaxPendingOutboundMessages { get; set; }
-
-        public ulong MaxOutboundRetransmissionCount { get; set; }
 
         public bool MaxOutboundRetransmissionEnforced { get; set; }
 
@@ -111,8 +89,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         public bool HasWill { get; set; }
 
         public ISessionStatePersistenceProvider SessionStatePersistenceProvider { get; set; }
-
-        public ITopicNameRouter TopicNameRouter { get; set; }
 
         public IWillMessageProvider WillMessageProvider { get; set; }
 

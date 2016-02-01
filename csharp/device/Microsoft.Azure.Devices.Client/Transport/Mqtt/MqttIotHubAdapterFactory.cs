@@ -22,8 +22,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             IotHubConnectionString iotHubConnectionString, 
             MqttTransportSettings mqttTransportSettings)
         {
-            ISessionStatePersistenceProvider persistanceProvider = this.settings.SessionStatePersistenceProvider;
-            ITopicNameRouter topicNameRouter = this.settings.TopicNameRouter;
+            ISessionStatePersistenceProvider persistenceProvider = this.settings.SessionStatePersistenceProvider;
             IWillMessageProvider willMessageProvider = mqttTransportSettings.HasWill ? this.settings.WillMessageProvider : null;
             
             return new MqttIotHubAdapter(
@@ -31,7 +30,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 iotHubConnectionString.HostName,
                 iotHubConnectionString.GetPassword(),
                 mqttTransportSettings,
-                persistanceProvider,
+                persistenceProvider,
                 willMessageProvider,
                 onConnected,
                 onDisconnected,

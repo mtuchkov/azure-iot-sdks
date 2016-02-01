@@ -12,13 +12,13 @@ namespace Microsoft.Azure.Devices.Client.Transport
     /// <summary>
     /// Contains the implementation of methods that a device can use to send messages to and receive from the service.
     /// </summary>
-    abstract class TansportHandlerBase
+    abstract class TransportHandlerBase
     {
         bool openCalled;
         bool closeCalled;
         volatile TaskCompletionSource<object> openTaskCompletionSource;
 
-        protected TansportHandlerBase()
+        protected TransportHandlerBase()
         {
             this.ThisLock = new object();
             this.openTaskCompletionSource = new TaskCompletionSource<object>(this);
