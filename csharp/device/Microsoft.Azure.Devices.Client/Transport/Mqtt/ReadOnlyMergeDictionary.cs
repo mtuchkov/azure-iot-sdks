@@ -8,7 +8,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using System.Collections.Generic;
     using System.Diagnostics.Contracts;
 
-    sealed class ReadOnlyMergeDictionary<TKey, TValue> : IDictionary<TKey, TValue>
+    sealed class ReadOnlyMergeDictionary<TKey, TValue> : IDictionary<TKey, TValue>, IList<KeyValuePair<TKey, TValue>>
     {
         readonly IDictionary<TKey, TValue> mainDictionary;
         readonly IDictionary<TKey, TValue> secondaryDictionary;
@@ -131,5 +131,25 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             get { throw new NotSupportedException(); }
         }
 
+        public int IndexOf(KeyValuePair<TKey, TValue> item)
+        {
+            throw new NotSupportedException();
+        }
+
+        public void Insert(int index, KeyValuePair<TKey, TValue> item)
+        {
+            throw new NotSupportedException();
+        }
+
+        public void RemoveAt(int index)
+        {
+            throw new NotSupportedException();
+        }
+
+        public KeyValuePair<TKey, TValue> this[int index]
+        {
+            get { throw new NotSupportedException(); }
+            set { throw new NotSupportedException(); }
+        }
     }
 }

@@ -50,30 +50,26 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         static readonly Func<IChannelHandlerContext, Exception, bool> ShutdownOnWriteErrorHandler = (ctx, ex) => { ShutdownOnError(ctx, ex); return false; };
         static readonly ThreadLocal<Random> ThreadLocalRandom = new ThreadLocal<Random>(() => new Random((int)DateTime.UtcNow.ToFileTimeUtc()));
 
-        readonly MqttTransportSettings mqttTransportSettings;
-        readonly IWillMessageProvider willMessageProvider;
         readonly Action<MqttActionResult> connectCallback;
-        readonly Action<MqttActionResult> disconnectCallback;
-        readonly Action<MqttMessageReceivedResult> onMessageReceived;
-        readonly ISessionStatePersistenceProvider sessionStatePersistenceProvider;
-        
         readonly string deviceId;
-        readonly string iotHubHostName;
-        readonly string password;
-        readonly TimeSpan pingRequestTimeout;
-        readonly Dictionary<string, string> sessionContext;
-        readonly QualityOfService maxSupportedQos;
-
-        readonly SimpleWorkQueue<PublishWorkItem> serviceBoundOneWayProcessor;
-        readonly OrderedTwoPhaseWorkQueue<int, PublishWorkItem> serviceBoundTwoWayProcessor;
-        
+        readonly Action<MqttActionResult> disconnectCallback;
         readonly SimpleWorkQueue<PublishPacket> deviceBoundOneWayProcessor;
         readonly OrderedTwoPhaseWorkQueue<int, PublishPacket> deviceBoundTwoWayProcessor;
+        readonly string iotHubHostName;
+        readonly MqttTransportSettings mqttTransportSettings;
+        readonly Action<MqttMessageReceivedResult> onMessageReceived;
+        readonly TimeSpan pingRequestTimeout;
+        readonly string password;
+        readonly Dictionary<string, string> sessionContext;
+        readonly ISessionStatePersistenceProvider sessionStatePersistenceProvider;
+        readonly SimpleWorkQueue<PublishWorkItem> serviceBoundOneWayProcessor;
+        readonly OrderedTwoPhaseWorkQueue<int, PublishWorkItem> serviceBoundTwoWayProcessor;
+        readonly IWillMessageProvider willMessageProvider;
         
-        StateFlags stateFlags;
-        QualityOfService maxReceivingSupportedQos;
         DateTime lastChannelActivityTime;
-
+        QualityOfService maxSupportedQos;
+        StateFlags stateFlags;
+        
         int InboundBacklogSize => this.deviceBoundOneWayProcessor.BacklogSize + this.deviceBoundTwoWayProcessor.BacklogSize;
 
         public MqttIotHubAdapter(
@@ -116,11 +112,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 {"DeviceId", this.deviceId}
             };
-        }
-
-        QualityOfService ReceiveQualityOfService
-        {
-            get { return this.mqttTransportSettings.ReceivingQoS > this.maxReceivingSupportedQos ? this.maxReceivingSupportedQos : this.mqttTransportSettings.ReceivingQoS; }
         }
 
         QualityOfService PublishToServerQualityOfService
@@ -364,7 +355,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                     this.ProcessConnectAck(context, (ConnAckPacket)packet);
                     break;
                 case PacketType.SUBACK:
-                    this.maxReceivingSupportedQos = ((SubAckPacket)packet).QualityOfService;
+                    this.maxSupportedQos = ((SubAckPacket)packet).ReturnCodes[0];
                     break;
                 case PacketType.PUBLISH:
                     this.ProcessPublish(context, (PublishPacket)packet);
@@ -421,7 +412,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.connectCallback(new MqttActionResult());
 
             string topicFilter = TelemetryTopicFilterFormat.FormatInvariant(this.deviceId);
-            var subscribePacket = new SubscribePacket(GenerateNextPacketId(), new SubscriptionRequest(topicFilter, this.ReceiveQualityOfService));
+            var subscribePacket = new SubscribePacket(GenerateNextPacketId(), new SubscriptionRequest(topicFilter, this.mqttTransportSettings.ReceivingQoS));
 
             await Util.WriteMessageAsync(context, subscribePacket, ShutdownOnWriteErrorHandler);
         }

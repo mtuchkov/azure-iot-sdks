@@ -13,7 +13,7 @@ namespace Microsoft.Azure.Devices.Client.Samples
         // String containing Hostname, Device Id & Device Key in one of the following formats:
         //  "HostName=<iothub_host_name>;DeviceId=<device_id>;SharedAccessKey=<device_key>"
         //  "HostName=<iothub_host_name>;CredentialType=SharedAccessSignature;DeviceId=<device_id>;SharedAccessSignature=SharedAccessSignature sr=<iot_host>/devices/<device_id>&sig=<token>&se=<expiry_time>";
-        private const string DeviceConnectionString = "HostName=acme-mtuchkov2.private.azure-devices-int.net;DeviceId=mt_device6;SharedAccessKey=cdJC8QScl7+RlVsy6PesGDttufvo5HWCAV/Lk9YGk+Y=;";
+        private const string DeviceConnectionString = "HostName=acme-mtuchkov.private.azure-devices-int.net;DeviceId=device1;SharedAccessKey=l3s/NXcR1oVBNMaJicX8CPVOy905WolzUSKZcYBIcpA=;";
 
         private static int MESSAGE_COUNT = 5;
 
@@ -70,11 +70,12 @@ namespace Microsoft.Azure.Devices.Client.Samples
 
                 //  Note: In this sample, the polling interval is set to 
                 //  10 seconds to enable you to see messages as they are sent.
-                //  To enable an IoT solution to scale, you should extend this //  interval. For example, to scale to 1 million devices, set 
+                //  To enable an IoT solution to scale, you should extend this 
+                //  interval. For example, to scale to 1 million devices, set 
                 //  the polling interval to 25 minutes.
                 //  For further information, see
                 //  https://azure.microsoft.com/documentation/articles/iot-hub-devguide/#messaging
-                Thread.Sleep(10000);
+                Thread.Sleep(1000);
             }
         }
     }

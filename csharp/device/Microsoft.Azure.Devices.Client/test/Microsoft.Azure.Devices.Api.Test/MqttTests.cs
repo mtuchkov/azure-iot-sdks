@@ -43,10 +43,15 @@ namespace Microsoft.Azure.Devices.Client.Test
 
             await Task.Delay(3000);
 
-            await client.SendEventAsync(new Message(new byte[] { 0, 1, 2, 3, 4, 5 }));
-            await client.SendEventAsync(new Message(new byte[] { 0, 1, 2, 3, 4, 5 }));
+            await client.SendEventAsync(new Message(Encoding.UTF8.GetBytes("Test1"))
+            {
+                MessageId = "1",
+                CorrelationId = "c1",
+                To = "r1"
+            });
+            await client.SendEventAsync(new Message(Encoding.UTF8.GetBytes("Test2")));
 
-            //await ReceiveNextMessageAsync(client);
+            await ReceiveNextMessageAsync(client);
             
             await client.CloseAsync();
         }
