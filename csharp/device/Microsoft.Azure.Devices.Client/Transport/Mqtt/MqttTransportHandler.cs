@@ -199,10 +199,21 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        protected override Task<Message> OnReceiveAsync(TimeSpan timeout)
+        protected override async Task<Message> OnReceiveAsync(TimeSpan timeout)
         {
             var cancellationToken = new CancellationToken();
-            return this.PeekAsync(cancellationToken).WithTimeout(timeout, () => "Receive message timed out.", cancellationToken);
+            try
+            {
+                return await this.PeekAsync(cancellationToken).WithTimeout(timeout, () => "Receive message timed out.", cancellationToken);
+            }
+            catch (TimeoutException)
+            {
+                return null;
+            }
+            catch (ObjectDisposedException)
+            {
+                return null;
+            }
         }
 
         async Task<Message> PeekAsync(CancellationToken cancellationToken)
