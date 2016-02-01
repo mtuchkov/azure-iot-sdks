@@ -15,14 +15,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         const bool DefaultHasWill = false;
         const bool DefaultMaxOutboundRetransmissionEnforced = false;
         const int DefaultKeepAliveInSeconds = 300;
-        const int DefaultMaxPendingOutboundMessages = 50;
         const int DefaultMaxPendingInboundMessages = 50;
-        const int DefaultMaxOutboundRetransmissionCount = 0;
         const QualityOfService DefaultPublishToServerQoS = QualityOfService.AtLeastOnce;
         const QualityOfService DefaultReceivingQoS = QualityOfService.AtLeastOnce;
         static readonly TimeSpan DefaultConnectArrivalTimeout = TimeSpan.FromSeconds(300);
         static readonly TimeSpan DefaultDeviceReceiveAckTimeout = TimeSpan.FromSeconds(300);
-        static readonly TimeSpan DefaultMaxKeepAliveTimeout = TimeSpan.FromSeconds(DefaultKeepAliveInSeconds / 2d);
 
         public MqttTransportSettings()
         {
