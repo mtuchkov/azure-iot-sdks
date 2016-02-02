@@ -8,8 +8,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using DotNetty.Codecs.Mqtt.Packets;
     using Microsoft.Azure.Devices.Client.Transport.Mqtt.Store;
 
-    class MqttTransportSettings
+    class MqttTransportSettings : ITransportSettings
     {
+        readonly TransportType transportType;
         const bool DefaultCleanSession = false;
         const bool DefaultDeviceReceiveAckCanTimeout = false;
         const bool DefaultHasWill = false;
@@ -21,8 +22,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         static readonly TimeSpan DefaultConnectArrivalTimeout = TimeSpan.FromSeconds(300);
         static readonly TimeSpan DefaultDeviceReceiveAckTimeout = TimeSpan.FromSeconds(300);
 
-        public MqttTransportSettings()
+        public MqttTransportSettings(TransportType transportType)
         {
+            this.transportType = transportType;
+
             this.CleanSession = DefaultCleanSession;
             this.ConnectArrivalTimeout = DefaultConnectArrivalTimeout;
             this.DeviceReceiveAckCanTimeout = DefaultDeviceReceiveAckCanTimeout;
@@ -38,25 +41,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.RetainPropertyName = "mqtt-retain";
             this.SessionStatePersistenceProvider = new InMemorySessionStateProvider();
             this.WillMessageProvider = null;
-        }
-
-        public MqttTransportSettings(XmlElement parent)
-        {
-            this.CleanSession = this.GetBoolean(parent, "cleanSession", DefaultCleanSession);
-            this.ConnectArrivalTimeout = this.GetTimeSpan(parent, "connectArrivalTimeout", DefaultConnectArrivalTimeout);
-            this.DeviceReceiveAckTimeout = this.GetTimeSpan(parent, "deviceReceiveAckCanTimeout", DefaultDeviceReceiveAckTimeout);
-            this.DeviceReceiveAckCanTimeout = this.GetBoolean(parent, "deviceReceiveAckCanTimeout", DefaultDeviceReceiveAckCanTimeout);
-            this.DupPropertyName = parent.GetAttribute("dupPropertyName");
-            this.HasWill = this.GetBoolean(parent, "hasWill", DefaultHasWill);
-            this.KeepAliveInSeconds = this.GetInteger(parent, "keepAliveInSeconds", DefaultKeepAliveInSeconds);
-            this.MaxOutboundRetransmissionEnforced = this.GetBoolean(parent, "defaultMaxOutboundRetransmissionEnforced", DefaultMaxOutboundRetransmissionEnforced);
-            this.MaxPendingInboundMessages = this.GetInteger(parent, "maxPendingInboundMessages", DefaultMaxPendingInboundMessages);
-            this.PublishToServerQoS = this.GetEnum(parent, "publishToServerQoS", DefaultPublishToServerQoS);
-            this.ReceivingQoS = this.GetEnum(parent, "receivingQoS", DefaultReceivingQoS);
-            this.QoSPropertyName = parent.GetAttribute("qoSPropertyName");
-            this.RetainPropertyName = "mqtt-retain";
-            this.SessionStatePersistenceProvider = new InMemorySessionStateProvider(); // this.CreateImplementation<ISessionStatePersistenceProvider>(configuration.SessionStatePersistenceProviderTypeName, typeof(InMemorySessionStateProvider));
-            this.WillMessageProvider = null;// this.CreateImplementation<IWillMessageProvider>(configuration.WillMessageProviderTypeName, typeof(WillMessageProvider));
         }
 
         public bool DeviceReceiveAckCanTimeout { get; set; }
@@ -148,6 +132,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 impl = Activator.CreateInstance(AppDomain.CurrentDomain, defaultImplType.AssemblyQualifiedName, defaultImplType.FullName) as T;
             }
             return impl;
+        }
+
+        public TransportType GetTransportType()
+        {
+            return this.transportType;
         }
     }
 }

@@ -18,6 +18,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using DotNetty.Transport.Channels.Sockets;
     using Microsoft.Azure.Devices.Client.Exceptions;
     using Microsoft.Azure.Devices.Client.Extensions;
+    using TransportType = Microsoft.Azure.Devices.Client.TransportType;
 
     sealed class MqttTransportHandler : TransportHandlerBase
     {
@@ -49,7 +50,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         Exception transportException;
 
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString)
-            : this(iotHubConnectionString, new MqttTransportSettings())
+            : this(iotHubConnectionString, new MqttTransportSettings(TransportType.Mqtt))
         {
 
         }

@@ -8,11 +8,11 @@ namespace Microsoft.Azure.Devices.Client
     using System.Text.RegularExpressions;
     using Microsoft.Azure.Devices.Client.Extensions;
     using Microsoft.Azure.Devices.Client.Transport;
-    using Microsoft.Azure.Devices.Client.Transport.Mqtt;
 #if !WINDOWS_UWP
     using System.Linq;
     using System.Threading.Tasks;
     using Microsoft.Azure.Devices.Client.Exceptions;
+    using Microsoft.Azure.Devices.Client.Transport.Mqtt;
 #endif
 
     // C# using aliases cannot name an unbound generic type declaration without supplying type arguments
@@ -68,7 +68,7 @@ namespace Microsoft.Azure.Devices.Client
         const RegexOptions RegexOptions = System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.IgnoreCase;
 
         static readonly Regex DeviceIdParameterRegex = new Regex(DeviceIdParameterPattern, RegexOptions);
-        DeviceClientHelper impl;
+        TransportHandlerBase impl;
 #if !WINDOWS_UWP
         readonly IotHubConnectionString iotHubConnectionString;
         readonly ITransportSettings[] transportSettings;
@@ -84,7 +84,7 @@ namespace Microsoft.Azure.Devices.Client
         }
 
 #else
-        DeviceClient(DeviceClientHelper impl, TransportType transportType)
+        DeviceClient(TransportHandlerBase impl, TransportType transportType)
         {
             this.impl = impl;
             this.TransportTypeInUse = transportType;
@@ -202,10 +202,9 @@ namespace Microsoft.Azure.Devices.Client
                 case TransportType.Http1:
 #if WINDOWS_UWP
                     var iotHubConnectionString = IotHubConnectionString.Parse(connectionString);
-                    return new DeviceClient(new HttpDeviceClient(iotHubConnectionString), TransportType.Http1);
+                    return new DeviceClient(new HttpTransportHandler(iotHubConnectionString), TransportType.Http1);
 #else
                     return CreateFromConnectionString(connectionString, new ITransportSettings[] { new Http1TransportSettings() });
-#endif
 #endif
                 default:
                     throw new InvalidOperationException("Unsupported Transport Type {0}".FormatInvariant(transportType));
@@ -654,17 +653,17 @@ namespace Microsoft.Azure.Devices.Client
             // Concrete Device Client creation was deferred. Use prioritized list of transports.
             foreach (var transportSetting in this.transportSettings)
             {
-                DeviceClientHelper helper;
+                TransportHandlerBase helper;
                 try
                 {
                     switch (transportSetting.GetTransportType())
                     {                    
                         case TransportType.Amqp_WebSocket_Only:
                         case TransportType.Amqp_Tcp_Only:
-                            helper = new AmqpDeviceClient(this.iotHubConnectionString, transportSetting as AmqpTransportSettings);
+                            helper = new AmqpTransportHandler(this.iotHubConnectionString, transportSetting as AmqpTransportSettings);
                             break;
                         case TransportType.Http1:
-                            helper = new HttpDeviceClient(this.iotHubConnectionString, transportSetting as Http1TransportSettings);
+                            helper = new HttpTransportHandler(this.iotHubConnectionString, transportSetting as Http1TransportSettings);
                             break;
                         default:
                             throw new InvalidOperationException("Unsupported Transport Setting {0}".FormatInvariant(transportSetting));
