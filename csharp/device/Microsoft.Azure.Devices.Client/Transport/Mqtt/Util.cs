@@ -12,12 +12,24 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using DotNetty.Buffers;
     using DotNetty.Codecs.Mqtt.Packets;
     using DotNetty.Transport.Channels;
-    using Microsoft.Azure.Amqp;
     using Microsoft.Azure.Devices.Client.Common;
     using Microsoft.Azure.Devices.Client.Extensions;
 
     static class Util
     {
+        static class PacketIdGenerator
+        {
+            static ushort current = (ushort)new Random((int)DateTime.UtcNow.ToFileTimeUtc()).Next(0, ushort.MaxValue);
+
+            public static int Next()
+            {
+                unchecked
+                {
+                    return current++;
+                }
+            }
+        }
+
         static class IotHubWirePropertyNames
         {
             public const string AbsoluteExpiryTime = "$.exp";
@@ -72,6 +84,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         static readonly char[] WildcardChars = { MultiSegmentWildcardChar, SingleSegmentWildcardChar };
         const string IotHubTrueString = "true";
         const string SegmentSeparator = "/";
+        const int MaxPayloadSize = 0x3ffff;
 
         public static bool CheckTopicFilterMatch(string topicName, string topicFilter)
         {
@@ -172,16 +185,13 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             return message;
         }
 
-        public static async Task<PublishPacket> ComposePublishPacketAsync(IChannelHandlerContext context, Message message,
-            QualityOfService qos, string topicName)
+        public static async Task<PublishPacket> ComposePublishPacketAsync(IChannelHandlerContext context, Message message, QualityOfService qos, string topicName)
         {
-            bool duplicate = message.DeliveryCount > 0;
-
-            var packet = new PublishPacket(qos, duplicate, false);
+           var packet = new PublishPacket(qos, false, false);
             packet.TopicName = PopulateMessagePropertiesFromMessage(topicName, message);
             if (qos > QualityOfService.AtMostOnce)
             {
-                int packetId = unchecked((ushort)message.SequenceNumber);
+                int packetId = GetNextPacketId();
                 switch (qos)
                 {
                     case QualityOfService.AtLeastOnce:
@@ -198,7 +208,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             using (Stream payloadStream = message.GetBodyStream())
             {
                 long streamLength = payloadStream.Length;
-                if (streamLength > int.MaxValue)
+                if (streamLength > MaxPayloadSize)
                 {
                     throw new InvalidOperationException(string.Format("Message size ({0} bytes) is too big to process.", streamLength));
                 }
@@ -290,6 +300,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 return (DeliveryAcknowledgement)Enum.Parse(typeof(DeliveryAcknowledgement), property.Value, true);
             }
             return property.Value;
+        }
+        public static int GetNextPacketId()
+        {
+            return PacketIdGenerator.Next();
         }
     }
 }

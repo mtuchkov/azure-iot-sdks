@@ -7,6 +7,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using System.Collections.Generic;
     using System.Threading.Tasks;
     using DotNetty.Transport.Channels;
+    using Microsoft.Azure.Devices.Client.Exceptions;
 
     class OrderedTwoPhaseWorkQueue<TWorkId, TWork> : SimpleWorkQueue<TWork> where TWorkId:IEquatable<TWorkId>
     {
@@ -36,12 +37,16 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         public Task CompleteWorkAsync(IChannelHandlerContext context, TWorkId workId)
         {
+            if (this.incompleteQueue.Count == 0)
+            {
+                throw new IotHubClientException("Nothing to complete.");
+            }
             IncompleteWorkItem incompleteWorkItem = this.incompleteQueue.Dequeue();
-            if (incompleteWorkItem.Id .Equals(workId))
+            if (incompleteWorkItem.Id.Equals(workId))
             {
                 return this.completeWork(context, incompleteWorkItem.WorkItem);
             }
-            throw new InvalidOperationException(string.Format("Work must be complete in the same order as it was started. Expected work id: '{0}', actual work id: '{1}'", incompleteWorkItem.Id, workId));
+            throw new IotHubClientException($"Work must be complete in the same order as it was started. Expected work id: '{incompleteWorkItem.Id}', actual work id: '{workId}'");
         }
 
         protected override async Task DoWorkAsync(IChannelHandlerContext context, TWork work)

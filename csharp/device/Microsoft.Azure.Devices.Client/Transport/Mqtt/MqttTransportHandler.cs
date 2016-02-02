@@ -44,10 +44,17 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly SemaphoreSlim receivingSemaphore = new SemaphoreSlim(0);
         readonly CancellationTokenSource disconnectAwaitersCancellationSource = new CancellationTokenSource();
 
+        StateFlags State
+        {
+            get { return (StateFlags)Interlocked.Read(ref this.transportStatus); }
+            set { Interlocked.Exchange(ref this.transportStatus, (long)value); }
+        }
+
         Func<Task> cleanupFunc;
         IChannel channel;
-        long transportStatus = 0;
+        long transportStatus = (long)StateFlags.Closed;
         Exception transportException;
+        public static readonly TimeSpan DefaultReceiveTimeoutInSeconds = TimeSpan.FromSeconds(20);
 
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString)
             : this(iotHubConnectionString, new MqttTransportSettings(TransportType.Mqtt))
@@ -57,7 +64,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings)
         {
-            this.DefaultReceiveTimeout = TimeSpan.FromSeconds(20);
+            this.DefaultReceiveTimeout = DefaultReceiveTimeoutInSeconds;
             this.connectCompletion = new TaskCompletionSource();
             this.mqttIotHubAdapterFactory = new MqttIotHubAdapterFactory(settings);
             this.messageQueue = new ConcurrentQueue<Message>();
@@ -153,37 +160,28 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
             this.ScheduleCleanup(async () =>
             {
-                try
-                {
-                    this.disconnectAwaitersCancellationSource.Cancel();
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine(ex);
-                    throw;
-                }
+                this.disconnectAwaitersCancellationSource.Cancel();
                 await this.channel.WriteAsync(DisconnectPacket.Instance);
                 await this.channel.CloseAsync();
             });
 
             await this.connectCompletion.Task;
-            Interlocked.Exchange(ref this.transportStatus, (long)StateFlags.Open);
+            this.State = StateFlags.Open;
         }
 
         protected override async Task OnCloseAsync()
         {
             this.ThrowIfNotOpen();
-            await Task.Yield();
             try
             {
-                Interlocked.Exchange(ref this.transportStatus, (long)StateFlags.Closing);
+                this.State = StateFlags.Closing;
                 await this.cleanupFunc();
-                Interlocked.Exchange(ref this.transportStatus, (long)StateFlags.Closed);
+                this.State = StateFlags.Closed;
             }
             catch (Exception ex)
             {
                 this.transportException = ex;
-                Interlocked.Exchange(ref this.transportStatus, (long)StateFlags.Error);
+                this.State = StateFlags.Error;
             }
         }
 
@@ -209,23 +207,20 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.ThrowIfNotOpen();
             try
             {
-                while (true)
+                await this.receivingSemaphore.WaitAsync(timeout, this.disconnectAwaitersCancellationSource.Token);
+                Message message;
+                lock (this.syncRoot)
                 {
-                    await this.receivingSemaphore.WaitAsync(timeout, this.disconnectAwaitersCancellationSource.Token);
-                    Message message;
-                    lock (this.syncRoot)
+                    if (!this.messageQueue.TryDequeue(out message))
                     {
-                        if (!this.messageQueue.TryDequeue(out message))
-                        {
-                            return null;
-                        }
-                        if (this.qos == QualityOfService.AtLeastOnce)
-                        {
-                            this.completionQueue.Enqueue(message.LockToken);
-                        }
+                        return null;
                     }
-                    return message;
+                    if (this.qos == QualityOfService.AtLeastOnce)
+                    {
+                        this.completionQueue.Enqueue(message.LockToken);
+                    }
                 }
+                return message;
             }
             catch (OperationCanceledException)
             {
@@ -294,7 +289,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
             catch (Exception ex)
             {
-                throw new AggregateException(this.transportException, ex);
+                this.transportException = new AggregateException(this.transportException, ex);
             }
         }
         #endregion
@@ -315,9 +310,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         void ThrowIfNotOpen()
         {
-            if (Interlocked.Read(ref this.transportStatus) != (long)StateFlags.Open)
+            var state = this.State;
+
+            if (state != StateFlags.Open)
             {
-                if (Interlocked.Read(ref this.transportStatus) == (long)StateFlags.Error)
+                if (state == StateFlags.Error)
                 {
                     throw this.transportException;
                 }

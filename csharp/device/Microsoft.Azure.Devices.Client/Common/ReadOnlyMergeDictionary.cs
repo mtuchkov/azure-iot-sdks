@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
+namespace Microsoft.Azure.Devices.Client.Common
 {
     using System;
     using System.Collections;
@@ -84,8 +84,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 return true;
             }
-            IDictionary<TKey, TValue> msgContext = this.secondaryDictionary;
-            return msgContext != null && msgContext.ContainsKey(key);
+            return this.secondaryDictionary.ContainsKey(key);
         }
 
         void IDictionary<TKey, TValue>.Add(TKey key, TValue value)

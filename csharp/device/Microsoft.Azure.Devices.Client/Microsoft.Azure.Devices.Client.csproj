@@ -193,7 +193,7 @@
     <Compile Include="Transport\Mqtt\MqttIotHubAdapterFactory.cs" />
     <Compile Include="Transport\Mqtt\ReadOnlyByteBufferStream.cs" />
     <Compile Include="Transport\Mqtt\RouteDestinationType.cs" />
-    <Compile Include="Transport\Mqtt\ReadOnlyMergeDictionary.cs" />
+    <Compile Include="Common\ReadOnlyMergeDictionary.cs" />
     <Compile Include="Transport\Mqtt\SessionContextProvider.cs" />
     <Compile Include="Transport\Mqtt\MqttIotHubAdapter.cs" />
     <Compile Include="Transport\Mqtt\MqttTransportHandler.cs" />
@@ -228,7 +228,6 @@
     <Compile Include="Transport\Mqtt\ChannelMessageProcessingException.cs" />
     <Compile Include="Transport\Mqtt\MqttTransportSettings.cs" />
     <Compile Include="Transport\Mqtt\SingleInstanceEventLoopGroup.cs" />
-    <Compile Include="Transport\Mqtt\TaskExtensions.cs" />
     <Compile Include="Transport\Mqtt\Util.cs" />
     <Compile Include="Transport\Mqtt\WillMessage.cs" />
     <Compile Include="Transport\TransportHandlerBase.cs" />
