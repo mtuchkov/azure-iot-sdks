@@ -15,7 +15,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using Microsoft.Azure.Amqp;
     using Microsoft.Azure.Devices.Client.Common;
     using Microsoft.Azure.Devices.Client.Extensions;
-    using Microsoft.Azure.Devices.Client.Transport.Mqtt.Store;
 
     static class Util
     {
@@ -214,61 +213,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             return packet;
         }
 
-        public static SubAckPacket AddSubscriptions(ISessionState session, SubscribePacket packet, QualityOfService maxSupportedQos)
-        {
-            List<Subscription> subscriptions = session.Subscriptions;
-            var returnCodes = new List<QualityOfService>(subscriptions.Count);
-            foreach (SubscriptionRequest request in packet.Requests)
-            {
-                Subscription existingSubscription = null;
-                for (int i = subscriptions.Count - 1; i >= 0; i--)
-                {
-                    Subscription subscription = subscriptions[i];
-                    if (subscription.TopicFilter.Equals(request.TopicFilter, StringComparison.Ordinal))
-                    {
-                        subscriptions.RemoveAt(i);
-                        existingSubscription = subscription;
-                        break;
-                    }
-                }
-
-                QualityOfService finalQos = request.QualityOfService < maxSupportedQos ? request.QualityOfService : maxSupportedQos;
-
-                subscriptions.Add(existingSubscription == null
-                    ? new Subscription(request.TopicFilter, request.QualityOfService)
-                    : existingSubscription.CreateUpdated(finalQos));
-
-                returnCodes.Add(finalQos);
-            }
-            var ack = new SubAckPacket
-            {
-                PacketId = packet.PacketId,
-                ReturnCodes = returnCodes
-            };
-            return ack;
-        }
-
-        public static UnsubAckPacket RemoveSubscriptions(ISessionState session, UnsubscribePacket packet)
-        {
-            List<Subscription> subscriptions = session.Subscriptions;
-            foreach (string topicToRemove in packet.TopicFilters)
-            {
-                for (int i = subscriptions.Count - 1; i >= 0; i--)
-                {
-                    if (subscriptions[i].TopicFilter.Equals(topicToRemove, StringComparison.Ordinal))
-                    {
-                        subscriptions.RemoveAt(i);
-                        break;
-                    }
-                }
-            }
-            var ack = new UnsubAckPacket
-            {
-                PacketId = packet.PacketId
-            };
-            return ack;
-        }
-
         public static async Task WriteMessageAsync(IChannelHandlerContext context, object message, Func<IChannelHandlerContext, Exception, bool> exceptionHandler)
         {
             try
@@ -317,6 +261,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             return topicName.EndsWith(SegmentSeparator, StringComparison.Ordinal) ? topicName + properties + SegmentSeparator : topicName + SegmentSeparator + properties;
         }
+
         static string ConvertFromSystemProperties(object systemProperty)
         {
             if (systemProperty is string)

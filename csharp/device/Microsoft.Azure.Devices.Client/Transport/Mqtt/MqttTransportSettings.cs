@@ -5,7 +5,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 {
     using System;
     using DotNetty.Codecs.Mqtt.Packets;
-    using Microsoft.Azure.Devices.Client.Transport.Mqtt.Store;
 
     class MqttTransportSettings : ITransportSettings
     {
@@ -38,8 +37,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.ReceivingQoS = DefaultReceivingQoS;
             this.QoSPropertyName = "mqtt-qos";
             this.RetainPropertyName = "mqtt-retain";
-            this.SessionStatePersistenceProvider = new InMemorySessionStateProvider();
-            this.WillMessageProvider = null;
+            this.WillMessage = null;
         }
 
         public bool DeviceReceiveAckCanTimeout { get; set; }
@@ -68,9 +66,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         public bool HasWill { get; set; }
 
-        public ISessionStatePersistenceProvider SessionStatePersistenceProvider { get; set; }
-
-        public IWillMessageProvider WillMessageProvider { get; set; }
+        public IWillMessage WillMessage { get; set; }
 
         public TransportType GetTransportType()
         {

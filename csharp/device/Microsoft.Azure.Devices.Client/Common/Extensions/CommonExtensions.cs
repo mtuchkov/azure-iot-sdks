@@ -189,13 +189,14 @@ namespace Microsoft.Azure.Devices.Client.Extensions
                 throw new ArgumentOutOfRangeException("n");
             }
 
+            startIndex--;
             for (int i = 0; i < n; i++)
             {
+                startIndex++;
                 if (startIndex >= str.Length || (startIndex = str.IndexOf(value, startIndex)) < 0)
                 {
                     return -1;
                 }
-                startIndex++;
             }
             
             return startIndex;

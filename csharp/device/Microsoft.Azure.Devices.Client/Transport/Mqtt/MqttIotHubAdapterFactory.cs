@@ -4,7 +4,6 @@
 namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 {
     using System;
-    using Microsoft.Azure.Devices.Client.Transport.Mqtt.Store;
 
     class MqttIotHubAdapterFactory 
     {
@@ -22,16 +21,14 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             IotHubConnectionString iotHubConnectionString, 
             MqttTransportSettings mqttTransportSettings)
         {
-            ISessionStatePersistenceProvider persistenceProvider = this.settings.SessionStatePersistenceProvider;
-            IWillMessageProvider willMessageProvider = mqttTransportSettings.HasWill ? this.settings.WillMessageProvider : null;
+            IWillMessage willMessage = mqttTransportSettings.HasWill ? this.settings.WillMessage : null;
             
             return new MqttIotHubAdapter(
                 iotHubConnectionString.DeviceId,
                 iotHubConnectionString.HostName,
                 iotHubConnectionString.GetPassword(),
                 mqttTransportSettings,
-                persistenceProvider,
-                willMessageProvider,
+                willMessage,
                 onConnected,
                 onMessageReceived,
                 onError);

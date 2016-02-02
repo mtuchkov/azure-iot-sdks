@@ -18,7 +18,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using Microsoft.Azure.Devices.Client.Common;
     using Microsoft.Azure.Devices.Client.Exceptions;
     using Microsoft.Azure.Devices.Client.Extensions;
-    using Microsoft.Azure.Devices.Client.Transport.Mqtt.Store;
 
     sealed class MqttIotHubAdapter : ChannelHandlerAdapter
     {
@@ -63,10 +62,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly TimeSpan pingRequestTimeout;
         readonly string password;
         readonly Dictionary<string, string> sessionContext;
-        readonly ISessionStatePersistenceProvider sessionStatePersistenceProvider;
         readonly SimpleWorkQueue<PublishWorkItem> serviceBoundOneWayProcessor;
         readonly OrderedTwoPhaseWorkQueue<int, PublishWorkItem> serviceBoundTwoWayProcessor;
-        readonly IWillMessageProvider willMessageProvider;
+        readonly IWillMessage willMessage;
         
         DateTime lastChannelActivityTime;
         QualityOfService maxSupportedQos;
@@ -80,8 +78,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             string iotHubHostName, 
             string password, 
             MqttTransportSettings mqttTransportSettings, 
-            ISessionStatePersistenceProvider sessionStatePersistenceProvider, 
-            IWillMessageProvider willMessageProvider,
+            IWillMessage willMessage,
             Action onConnected,
             Action<Message> onMessageReceived,
             Action<Exception> onError)
@@ -90,15 +87,13 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             Contract.Requires(iotHubHostName != null);
             Contract.Requires(password != null);
             Contract.Requires(mqttTransportSettings != null);
-            Contract.Requires(sessionStatePersistenceProvider != null);
-            Contract.Requires(!mqttTransportSettings.HasWill || willMessageProvider != null);
+            Contract.Requires(!mqttTransportSettings.HasWill || willMessage != null);
 
             this.deviceId = deviceId;
             this.iotHubHostName = iotHubHostName;
             this.password = password;
             this.mqttTransportSettings = mqttTransportSettings;
-            this.sessionStatePersistenceProvider = sessionStatePersistenceProvider;
-            this.willMessageProvider = willMessageProvider;
+            this.willMessage = willMessage;
             this.onConnected = onConnected;
             this.onError = onError;
             this.onMessageReceived = onMessageReceived;
@@ -229,10 +224,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             };
             if (connectPacket.HasWill)
             {
-                connectPacket.WillMessage = this.GetWillMessageBody(this.willMessageProvider.Message);
-                connectPacket.WillQualityOfService = this.willMessageProvider.QoS;
+                connectPacket.WillMessage = this.GetWillMessageBody(this.willMessage.Message);
+                connectPacket.WillQualityOfService = this.willMessage.QoS;
                 connectPacket.WillRetain = false;
-                string willtopicName = "devices/" + this.willMessageProvider.Message.Properties["DeviceId"] + "/messages/events/";
+                string willtopicName = "devices/" + this.willMessage.Message.Properties["DeviceId"] + "/messages/events/";
                 connectPacket.WillTopicName = willtopicName;
             }
             this.stateFlags = StateFlags.Connecting;
@@ -317,8 +312,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             try
             {
-                await this.EstablishSessionStateAsync(this.deviceId, this.mqttTransportSettings.CleanSession, packet.SessionPresent);
-
                 this.stateFlags = StateFlags.Connected;
                 this.ResumeReadingIfNecessary(context);
             }
@@ -596,34 +589,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             bodyStream.Read(buffer, 0, buffer.Length);
             IByteBuffer copiedBuffer = Unpooled.CopiedBuffer(buffer);
             return copiedBuffer;
-        }
-
-        /// <summary>
-        ///     Loads and updates (as necessary) session state.
-        /// </summary>
-        /// <param name="clientId">Client identificator to load the session state for.</param>
-        /// <param name="cleanSession">Determines whether session has to be deleted if it already exists.</param>
-        /// <param name="sessionPresent">Determines wether session present on server</param>
-        /// <returns></returns>
-        async Task EstablishSessionStateAsync(string clientId, bool cleanSession, bool sessionPresent)
-        {
-            ISessionState existingSessionState = await this.sessionStatePersistenceProvider.GetAsync(clientId);
-
-            if (existingSessionState != null)
-            {
-                if (!sessionPresent || cleanSession)
-                {
-                    await this.sessionStatePersistenceProvider.DeleteAsync(clientId, existingSessionState);
-                    this.sessionStatePersistenceProvider.Create(true);
-                }
-                else
-                {
-                }
-            }
-            else
-            {
-                this.sessionStatePersistenceProvider.Create(true);
-            }
         }
 
         static int GenerateNextPacketId()

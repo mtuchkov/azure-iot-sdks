@@ -14,10 +14,11 @@ namespace Microsoft.Azure.Devices.Client.Common
         public const char KeyValueSeparator = '=';
         public const char PropertySeparator = '&';
         public const char NotAllowedCharacter = '/';
+        public const int PropertySeparatorLength = 1;
 
         //We assume that in avarage 20% of string are the encoded characters.
         //We can make a better estimation though.
-        const float EncodedSymbolsFactor = 0.2f;
+        const float EncodedSymbolsFactor = 1.2f;
 
         readonly IDictionary<string, string> output;
         readonly Tokenizer tokenizer;
@@ -83,6 +84,8 @@ namespace Microsoft.Azure.Devices.Client.Common
                 {
                     firstProperty = property;
                 }
+                
+                //In case of value, '=' and ',' take up length, otherwise just ','
                 estimatedLength += property.Key.Length + (property.Value?.Length + 2 ?? 1);
                 propertiesCount++;
             }
@@ -108,7 +111,7 @@ namespace Microsoft.Azure.Devices.Client.Common
                 }
                 propertiesBuilder.Append(PropertySeparator);
             }
-            return propertiesBuilder.Length == 0 ? string.Empty : propertiesBuilder.ToString(0, propertiesBuilder.Length - 1);
+            return propertiesBuilder.Length == 0 ? string.Empty : propertiesBuilder.ToString(0, propertiesBuilder.Length - PropertySeparatorLength);
         }
 
         public enum TokenType
@@ -272,6 +275,7 @@ namespace Microsoft.Azure.Devices.Client.Common
                     }
                     this.position++;
                 }
+
                 if (this.currentState == TokenizerState.Error)
                 {
                     throw new FormatException(errorMessage);

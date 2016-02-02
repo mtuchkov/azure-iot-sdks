@@ -3,22 +3,18 @@
 
 namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 {
-    using System.Collections.Generic;
     using DotNetty.Codecs.Mqtt.Packets;
 
-    public class StaticWillMessageProvider : IWillMessageProvider
+    public class WillMessage : IWillMessage
     {
         public Message Message { get; private set; }
 
         public QualityOfService QoS { get; set; }
 
-        public IDictionary<string, string> Properties { get; set; }
-
-        public StaticWillMessageProvider(QualityOfService qos, Message message, IDictionary<string, string> properties)
+        public WillMessage(QualityOfService qos, Message message)
         {
             this.QoS = qos;
             this.Message = message;
-            this.Properties = properties;
         }
     }
 }
