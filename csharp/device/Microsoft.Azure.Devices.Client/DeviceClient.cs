@@ -501,7 +501,7 @@ namespace Microsoft.Azure.Devices.Client
 #endif
                 return this.impl.AbandonAsync(message).AsTaskOrAsyncOp();
 #if !WINDOWS_UWP
-            }
+        }
 #endif
         }
 
@@ -579,7 +579,7 @@ namespace Microsoft.Azure.Devices.Client
 #endif
                 return this.impl.SendEventAsync(message).AsTaskOrAsyncOp();
 #if !WINDOWS_UWP
-            }
+        }
 #endif
         }
 
