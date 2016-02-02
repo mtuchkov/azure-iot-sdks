@@ -4,7 +4,6 @@
 namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 {
     using System;
-    using System.Xml;
     using DotNetty.Codecs.Mqtt.Packets;
     using Microsoft.Azure.Devices.Client.Transport.Mqtt.Store;
 
@@ -72,67 +71,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         public ISessionStatePersistenceProvider SessionStatePersistenceProvider { get; set; }
 
         public IWillMessageProvider WillMessageProvider { get; set; }
-
-        bool GetBoolean(XmlElement element, string settingName, bool defaultValue)
-        {
-            string data = element.GetAttribute(settingName);
-            if (string.IsNullOrEmpty(data))
-            {
-                return bool.Parse(data);
-            }
-            return defaultValue;
-        }
-
-        TimeSpan GetTimeSpan(XmlElement element, string settingName, TimeSpan defaultValue)
-        {
-            string data = element.GetAttribute(settingName);
-            if (string.IsNullOrEmpty(data))
-            {
-                return TimeSpan.Parse(data);
-            }
-            return defaultValue;
-        }
-
-        int GetInteger(XmlElement element, string settingName, int defaultValue)
-        {
-            string data = element.GetAttribute(settingName);
-            if (string.IsNullOrEmpty(data))
-            {
-                return int.Parse(data);
-            }
-            return defaultValue;
-        }
-
-        ulong GetULong(XmlElement element, string settingName, ulong defaultValue)
-        {
-            string data = element.GetAttribute(settingName);
-            if (string.IsNullOrEmpty(data))
-            {
-                return ulong.Parse(data);
-            }
-            return defaultValue;
-        }
-
-        T GetEnum<T>(XmlElement element, string settingName, T defaultValue) where T : struct
-        {
-            string data = element.GetAttribute(settingName);
-            if (string.IsNullOrEmpty(data))
-            {
-                return (T)Enum.Parse(typeof(T), data);
-            }
-            return defaultValue;
-        }
-
-        T CreateImplementation<T>(string implTypeName, Type defaultImplType) where T : class
-        {
-            Type type = Type.GetType(implTypeName);
-            var impl = Activator.CreateInstance(AppDomain.CurrentDomain, type.AssemblyQualifiedName, type.FullName) as T;
-            if (impl != null)
-            {
-                impl = Activator.CreateInstance(AppDomain.CurrentDomain, defaultImplType.AssemblyQualifiedName, defaultImplType.FullName) as T;
-            }
-            return impl;
-        }
 
         public TransportType GetTransportType()
         {

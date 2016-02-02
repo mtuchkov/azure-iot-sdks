@@ -15,7 +15,6 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
     sealed class AmqpTransportHandler : TransportHandlerBase
     {
-        const uint DefaultPrefetchCount = 50;
         static readonly IotHubConnectionCache connectionCache = new IotHubConnectionCache(AccessRights.DeviceConnect);
         readonly string deviceId;
         readonly Client.FaultTolerantAmqpObject<SendingAmqpLink> faultTolerantEventSendingLink;
@@ -346,7 +345,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
         {
             string path = string.Format(CultureInfo.InvariantCulture, "/devices/{0}/messages/deviceBound", HttpUtility.UrlEncode(this.deviceId));
 
-            return await this.IotHubConnection.CreateReceivingLink(path, timeout, DefaultPrefetchCount);
+            return await this.IotHubConnection.CreateReceivingLink(path, timeout, this.prefetchCount);
         }
     }
 }

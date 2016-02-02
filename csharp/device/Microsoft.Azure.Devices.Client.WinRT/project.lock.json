@@ -3,14 +3,6 @@
   "version": 1,
   "targets": {
     "UAP,Version=v10.0": {
-      "M2Mqtt/4.3.0": {
-        "compile": {
-          "lib/win81/M2Mqtt.WinRT.dll": {}
-        },
-        "runtime": {
-          "lib/win81/M2Mqtt.WinRT.dll": {}
-        }
-      },
       "Microsoft.CSharp/4.0.0": {
         "dependencies": {
           "System.Collections": "[4.0.10, )",
@@ -1554,14 +1546,6 @@
       }
     },
     "UAP,Version=v10.0/win10-arm": {
-      "M2Mqtt/4.3.0": {
-        "compile": {
-          "lib/win81/M2Mqtt.WinRT.dll": {}
-        },
-        "runtime": {
-          "lib/win81/M2Mqtt.WinRT.dll": {}
-        }
-      },
       "Microsoft.CSharp/4.0.0": {
         "dependencies": {
           "System.Collections": "[4.0.10, )",
@@ -3195,14 +3179,6 @@
       }
     },
     "UAP,Version=v10.0/win10-arm-aot": {
-      "M2Mqtt/4.3.0": {
-        "compile": {
-          "lib/win81/M2Mqtt.WinRT.dll": {}
-        },
-        "runtime": {
-          "lib/win81/M2Mqtt.WinRT.dll": {}
-        }
-      },
       "Microsoft.CSharp/4.0.0": {
         "dependencies": {
           "System.Collections": "[4.0.10, )",
@@ -4808,14 +4784,6 @@
       }
     },
     "UAP,Version=v10.0/win10-x64": {
-      "M2Mqtt/4.3.0": {
-        "compile": {
-          "lib/win81/M2Mqtt.WinRT.dll": {}
-        },
-        "runtime": {
-          "lib/win81/M2Mqtt.WinRT.dll": {}
-        }
-      },
       "Microsoft.CSharp/4.0.0": {
         "dependencies": {
           "System.Collections": "[4.0.10, )",
@@ -6454,14 +6422,6 @@
       }
     },
     "UAP,Version=v10.0/win10-x64-aot": {
-      "M2Mqtt/4.3.0": {
-        "compile": {
-          "lib/win81/M2Mqtt.WinRT.dll": {}
-        },
-        "runtime": {
-          "lib/win81/M2Mqtt.WinRT.dll": {}
-        }
-      },
       "Microsoft.CSharp/4.0.0": {
         "dependencies": {
           "System.Collections": "[4.0.10, )",
@@ -8067,14 +8027,6 @@
       }
     },
     "UAP,Version=v10.0/win10-x86": {
-      "M2Mqtt/4.3.0": {
-        "compile": {
-          "lib/win81/M2Mqtt.WinRT.dll": {}
-        },
-        "runtime": {
-          "lib/win81/M2Mqtt.WinRT.dll": {}
-        }
-      },
       "Microsoft.CSharp/4.0.0": {
         "dependencies": {
           "System.Collections": "[4.0.10, )",
@@ -9713,14 +9665,6 @@
       }
     },
     "UAP,Version=v10.0/win10-x86-aot": {
-      "M2Mqtt/4.3.0": {
-        "compile": {
-          "lib/win81/M2Mqtt.WinRT.dll": {}
-        },
-        "runtime": {
-          "lib/win81/M2Mqtt.WinRT.dll": {}
-        }
-      },
       "Microsoft.CSharp/4.0.0": {
         "dependencies": {
           "System.Collections": "[4.0.10, )",
@@ -11327,43 +11271,6 @@
     }
   },
   "libraries": {
-    "M2Mqtt/4.3.0": {
-      "sha512": "2A1uM20uxuovQKPA0dkZUqD9gUpIMaX7KxdLiVM7IEXdPRL709hGuudHnvlDxm2/6b2LcOjshrYGVG9vdpipag==",
-      "type": "Package",
-      "files": [
-        "[Content_Types].xml",
-        "_rels/.rels",
-        "lib/net39-cf/DeployFileList.txt",
-        "lib/net39-cf/M2Mqtt.NetCf39.dll",
-        "lib/net39-cf/M2Mqtt.NetCf39.pdb",
-        "lib/net45/M2Mqtt.Net.dll",
-        "lib/net45/M2Mqtt.Net.pdb",
-        "lib/netmf42/be/M2Mqtt.NetMf.pdb",
-        "lib/netmf42/be/M2Mqtt.NetMf.pdbx",
-        "lib/netmf42/be/M2Mqtt.NetMf.pe",
-        "lib/netmf42/le/M2Mqtt.NetMf.pdb",
-        "lib/netmf42/le/M2Mqtt.NetMf.pdbx",
-        "lib/netmf42/le/M2Mqtt.NetMf.pe",
-        "lib/netmf42/M2Mqtt.NetMf.dll",
-        "lib/netmf42/M2Mqtt.NetMf.pdb",
-        "lib/netmf43/be/M2Mqtt.NetMf.pdb",
-        "lib/netmf43/be/M2Mqtt.NetMf.pdbx",
-        "lib/netmf43/be/M2Mqtt.NetMf.pe",
-        "lib/netmf43/le/M2Mqtt.NetMf.pdb",
-        "lib/netmf43/le/M2Mqtt.NetMf.pdbx",
-        "lib/netmf43/le/M2Mqtt.NetMf.pe",
-        "lib/netmf43/M2Mqtt.NetMf.dll",
-        "lib/netmf43/M2Mqtt.NetMf.pdb",
-        "lib/win81/M2Mqtt.WinRT.dll",
-        "lib/win81/M2Mqtt.WinRT.pdb",
-        "lib/win81/M2Mqtt.WinRT.pri",
-        "lib/wpa81/M2Mqtt.WinRT.dll",
-        "lib/wpa81/M2Mqtt.WinRT.pdb",
-        "lib/wpa81/M2Mqtt.WinRT.pri",
-        "M2Mqtt.nuspec",
-        "package/services/metadata/core-properties/544fa7de1c7d493085a0648dcf3b10a2.psmdcp"
-      ]
-    },
     "Microsoft.CSharp/4.0.0": {
       "sha512": "oWqeKUxHXdK6dL2CFjgMcaBISbkk+AqEg+yvJHE4DElNzS4QaTsCflgkkqZwVlWby1Dg9zo9n+iCAMFefFdJ/A==",
       "type": "Package",
@@ -14740,7 +14647,6 @@
   },
   "projectFileDependencyGroups": {
     "": [
-      "M2Mqtt >= 4.3.0",
       "Microsoft.NETCore.UniversalWindowsPlatform >= 5.0.0",
       "Newtonsoft.Json >= 6.0.8"
     ],

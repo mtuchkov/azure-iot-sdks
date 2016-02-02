@@ -188,7 +188,7 @@ namespace Microsoft.Azure.Devices.Client
 #endif
                 case TransportType.Mqtt:
 #if WINDOWS_UWP
-                    throw new NotImplementedException("Amqp protocol is not supported");
+                    throw new NotImplementedException("Mqtt protocol is not supported");
 #else
                     return CreateFromConnectionString(connectionString, new ITransportSettings[] { new MqttTransportSettings(transportType) });
 #endif
@@ -277,6 +277,12 @@ namespace Microsoft.Azure.Devices.Client
                         break;
                     case TransportType.Http1:
                         if (!(transportSetting is Http1TransportSettings))
+                        {
+                            throw new InvalidOperationException("Unknown implementation of ITransportSettings type");
+                        }
+                        break;
+                    case TransportType.Mqtt:
+                        if (!(transportSetting is MqttTransportSettings))
                         {
                             throw new InvalidOperationException("Unknown implementation of ITransportSettings type");
                         }
@@ -664,6 +670,9 @@ namespace Microsoft.Azure.Devices.Client
                             break;
                         case TransportType.Http1:
                             helper = new HttpTransportHandler(this.iotHubConnectionString, transportSetting as Http1TransportSettings);
+                            break;
+                        case TransportType.Mqtt:
+                            helper = new MqttTransportHandler(this.iotHubConnectionString, transportSetting as MqttTransportSettings);
                             break;
                         default:
                             throw new InvalidOperationException("Unsupported Transport Setting {0}".FormatInvariant(transportSetting));
