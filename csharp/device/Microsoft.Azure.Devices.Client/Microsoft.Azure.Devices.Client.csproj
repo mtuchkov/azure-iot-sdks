@@ -188,7 +188,6 @@
     <Compile Include="Transport\Mqtt\Store\ISessionStatePersistenceProvider.cs" />
     <Compile Include="Http1TransportSettings.cs" />
     <Compile Include="Transport\HttpClientHelper.cs" />
-    <Compile Include="Transport\Mqtt\DeviceClientAdapter.cs" />
     <Compile Include="Transport\Mqtt\OrderedTwoPhaseWorkQueue.cs" />
     <Compile Include="Transport\Mqtt\SimpleWorkQueue.cs" />
     <Compile Include="Transport\Mqtt\IWillMessageProvider.cs" />
