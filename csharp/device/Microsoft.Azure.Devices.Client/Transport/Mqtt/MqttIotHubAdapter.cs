@@ -363,7 +363,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 var buffer = new byte[publish.Payload.ReadableBytes];
                 publish.Payload.GetBytes(0, buffer);
-                var bodyStream = new MemoryStream(publish.Payload.ToArray());
+                var bodyStream = new MemoryStream(buffer);
                 bodyStream.Position = 0;
 
                 message = new Message(bodyStream);
@@ -472,10 +472,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             catch (Exception ex)
             {
                 publish.Completion.TrySetException(ex);
-            }
-            finally
-            {
-                publish.Release();
             }
         }
         #endregion

@@ -15,7 +15,7 @@ namespace Microsoft.Azure.Devices.Client.Samples
         //  "HostName=<iothub_host_name>;DeviceId=<device_id>;SharedAccessKey=<device_key>"
         //  "HostName=<iothub_host_name>;CredentialType=SharedAccessSignature;DeviceId=<device_id>;SharedAccessSignature=SharedAccessSignature sr=<iot_host>/devices/<device_id>&sig=<token>&se=<expiry_time>";
         //private const string DeviceConnectionString = "<replace>";
-        private const string DeviceConnectionString = "HostName=E2ETestHub16part.df.azure-devices-int.net;DeviceId=mt_device2;SharedAccessKey=CV3ALFuwlOgriNVsv6aXnla/l9+N9dPaEn/iJPDJzBU=; GatewayHostName=ssl://E2ETestHub16part:8883";
+        private const string DeviceConnectionString = "HostName=E2ETestHub16part.df.azure-devices-int.net;DeviceId=mtuchkov-dd;SharedAccessKey=+5e01qe/Io/7UtnlQf276iWnpBctmguklDHpexOAVOM=;GatewayHostName=ssl://E2ETestHub16part:8883";
         private static int MESSAGE_COUNT = 5;
 
         static void Main(string[] args)
