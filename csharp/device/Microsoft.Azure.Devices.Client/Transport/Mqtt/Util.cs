@@ -187,7 +187,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         public static async Task<PublishPacket> ComposePublishPacketAsync(IChannelHandlerContext context, Message message, QualityOfService qos, string topicName)
         {
-           var packet = new PublishPacket(qos, false, false);
+            var packet = new PublishPacket(qos, false, false);
             packet.TopicName = PopulateMessagePropertiesFromMessage(topicName, message);
             if (qos > QualityOfService.AtMostOnce)
             {
@@ -201,7 +201,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                         packetId |= 0x8000; // set 15th bit
                         break;
                     default:
-                        throw new ArgumentOutOfRangeException("qos", qos, null);
+                        throw new ArgumentOutOfRangeException(nameof(qos), qos, null);
                 }
                 packet.PacketId = packetId;
             }
@@ -210,7 +210,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 long streamLength = payloadStream.Length;
                 if (streamLength > MaxPayloadSize)
                 {
-                    throw new InvalidOperationException(string.Format("Message size ({0} bytes) is too big to process.", streamLength));
+                    throw new InvalidOperationException($"Message size ({streamLength} bytes) is too big to process. Maximum payload size is {MaxPayloadSize}");
                 }
 
                 int length = (int)streamLength;
@@ -301,6 +301,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
             return property.Value;
         }
+
         public static int GetNextPacketId()
         {
             return PacketIdGenerator.Next();

@@ -16,6 +16,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using DotNetty.Transport.Bootstrapping;
     using DotNetty.Transport.Channels;
     using DotNetty.Transport.Channels.Sockets;
+    using Microsoft.Azure.Devices.Client.Common;
     using Microsoft.Azure.Devices.Client.Exceptions;
     using Microsoft.Azure.Devices.Client.Extensions;
     using TransportType = Microsoft.Azure.Devices.Client.TransportType;
@@ -143,7 +144,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         protected override TimeSpan DefaultReceiveTimeout { get; set; }
 
-        #region Client oprtations
+        #region Client operations
         protected override async Task OnOpenAsync(bool explicitOpen)
         {
             try
@@ -166,6 +167,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             });
 
             await this.connectCompletion.Task;
+
             this.State = StateFlags.Open;
         }
 
@@ -182,14 +184,15 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 this.transportException = ex;
                 this.State = StateFlags.Error;
+                throw;
             }
         }
 
-        protected override Task OnSendEventAsync(Message message)
+        protected override async Task OnSendEventAsync(Message message)
         {
             this.ThrowIfNotOpen();
 
-            return this.channel.WriteAndFlushAsync(message).ContinueWith((t, s) => { }, TaskScheduler.Default);
+            await this.channel.WriteAndFlushAsync(message);
         }
 
         protected override async Task OnSendEventAsync(IEnumerable<Message> messages)
@@ -228,7 +231,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        protected override Task OnCompleteAsync(string lockToken)
+        protected override async Task OnCompleteAsync(string lockToken)
         {
             this.ThrowIfNotOpen();
             if (this.qos == QualityOfService.AtMostOnce)
@@ -252,7 +255,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                     throw new InvalidOperationException($"Client MUST send PUBACK packets in the order in which the corresponding PUBLISH packets were received (QoS 1 messages) per [MQTT-4.6.0-2]. Expected lock token: '{expectedLockToken}'; actual lock token: '{lockToken}'.");
                 }
             }
-            return this.channel.WriteAndFlushAsync(lockToken);
+            await this.channel.WriteAndFlushAsync(lockToken);
         }
 
         protected override Task OnAbandonAsync(string lockToken)
@@ -281,10 +284,19 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         async void OnError(Exception exception)
         {
+            if (this.transportException == exception)
+            {
+                return;
+            }
             this.transportException = exception;
 
             try
             {
+                TaskStatus taskStatus = this.connectCompletion.Task.Status;
+                if (this.State == StateFlags.Closed && taskStatus != TaskStatus.RanToCompletion && taskStatus != TaskStatus.Faulted && taskStatus != TaskStatus.Canceled)
+                {
+                    this.connectCompletion.TrySetException(exception);
+                }
                 await this.OnCloseAsync();
             }
             catch (Exception ex)

@@ -31,18 +31,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.backlogQueue = new Queue<TWork>();
         }
 
-        public Task Completion
-        {
-            get { return this.completionSource.Task; }
-        }
+        public Task Completion => this.completionSource.Task;
 
         /// <summary>
         /// Current backlog size
         /// </summary>
-        public int BacklogSize
-        {
-            get { return this.backlogQueue.Count; }
-        }
+        public int BacklogSize => this.backlogQueue.Count;
 
         /// <summary>
         /// Puts the new work to backlog queue and resume work if worker is idle.
@@ -105,6 +99,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                     {
                         TWork workItem = queue.Dequeue();
                         ReferenceCountUtil.Release(workItem);
+                        (workItem as ICancellable)?.Cancel();
                     }
                     break;
                 case State.Aborted:

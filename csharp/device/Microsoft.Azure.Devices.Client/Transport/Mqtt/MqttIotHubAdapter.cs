@@ -7,7 +7,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using System.Collections.Generic;
     using System.Diagnostics.Contracts;
     using System.IO;
-    using System.Threading;
     using System.Threading.Tasks;
     using DotNetty.Buffers;
     using DotNetty.Codecs.Mqtt.Packets;
@@ -27,15 +26,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             NotConnected = 0,
             Connecting = 1,
             Connected = 2,
-            Closed = 4
+            Subscribing = 4,
+            Receiving = 8,
+            Closed = 16
         }
-
-        class PublishWorkItem
-        {
-            public PublishPacket Packet { get; set; }
-            public TaskCompletionSource Completion { get; set; }
-        }
-
         const string TelemetryTopicFilterFormat = "devices/{0}/messages/devicebound/#";
         const string TopicFormat = "devices/{0}/messages/events/";
             
@@ -43,7 +37,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         static readonly Action<object> PingServerCallback = PingServer;
         static readonly Action<object> CheckConnAckTimeoutCallback = ShutdownIfNotReady;
         static readonly Func<IChannelHandlerContext, Exception, bool> ShutdownOnWriteErrorHandler = (ctx, ex) => { ShutdownOnError(ctx, ex); return false; };
-        static readonly Random Random = new Random((int)DateTime.UtcNow.ToFileTimeUtc());
 
         readonly Action onConnected;
         readonly string deviceId;
@@ -55,17 +48,15 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly Action<Message> onMessageReceived;
         readonly TimeSpan pingRequestInterval;
         readonly string password;
-        readonly Dictionary<string, string> sessionContext;
         readonly SimpleWorkQueue<PublishWorkItem> serviceBoundOneWayProcessor;
         readonly OrderedTwoPhaseWorkQueue<int, PublishWorkItem> serviceBoundTwoWayProcessor;
         readonly IWillMessage willMessage;
         
         DateTime lastChannelActivityTime;
-        QualityOfService maxSupportedQos;
         StateFlags stateFlags;
+        TaskCompletionSource subscribeCompletion;
 
         int InboundBacklogSize => this.deviceBoundOneWayProcessor.BacklogSize + this.deviceBoundTwoWayProcessor.BacklogSize;
-        QualityOfService PublishToServerQualityOfService => this.mqttTransportSettings.PublishToServerQoS > this.maxSupportedQos ? this.maxSupportedQos : this.mqttTransportSettings.PublishToServerQoS;
 
         public MqttIotHubAdapter(
             string deviceId, 
@@ -91,19 +82,13 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.onConnected = onConnected;
             this.onError = onError;
             this.onMessageReceived = onMessageReceived;
-            this.maxSupportedQos = QualityOfService.AtLeastOnce;
             this.pingRequestInterval = this.mqttTransportSettings.KeepAliveInSeconds > 0 ? TimeSpan.FromSeconds(this.mqttTransportSettings.KeepAliveInSeconds / 2d) : TimeSpan.MaxValue;
 
             this.deviceBoundOneWayProcessor = new SimpleWorkQueue<PublishPacket>(this.AcceptMessageAsync);
             this.deviceBoundTwoWayProcessor = new OrderedTwoPhaseWorkQueue<int, PublishPacket>(this.AcceptMessageAsync, p => p.PacketId, this.SendAckAsync);
 
             this.serviceBoundOneWayProcessor = new SimpleWorkQueue<PublishWorkItem>(this.SendMessageToServerAsync);
-            this.serviceBoundTwoWayProcessor = new OrderedTwoPhaseWorkQueue<int, PublishWorkItem>(this.SendMessageToServerAsync, p => p.Packet.PacketId, this.ProcessAckAsync);
-
-            this.sessionContext = new Dictionary<string, string>
-            {
-                {"DeviceId", this.deviceId}
-            };
+            this.serviceBoundTwoWayProcessor = new OrderedTwoPhaseWorkQueue<int, PublishWorkItem>(this.SendMessageToServerAsync, p => p.Value.PacketId, this.ProcessAckAsync);
         }
 
         #region IChannelHandler overrides
@@ -200,6 +185,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         #region Connect
         async void Connect(IChannelHandlerContext context)
         {
+
             var connectPacket = new ConnectPacket
             {
                 ClientId = this.deviceId,
@@ -213,22 +199,23 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             };
             if (connectPacket.HasWill)
             {
-                connectPacket.WillMessage = this.GetWillMessageBody(this.willMessage.Message);
+                PublishPacket will = await Util.ComposePublishPacketAsync(context, this.willMessage.Message, this.mqttTransportSettings.PublishToServerQoS, string.Format(TopicFormat, this.deviceId));
+
+                connectPacket.WillMessage = will.Payload;
                 connectPacket.WillQualityOfService = this.willMessage.QoS;
                 connectPacket.WillRetain = false;
-                string willtopicName = "devices/" + this.deviceId + "/messages/events/";
-                connectPacket.WillTopicName = willtopicName;
+                connectPacket.WillTopicName = will.TopicName;
             }
             this.stateFlags = StateFlags.Connecting;
 
             await Util.WriteMessageAsync(context, connectPacket, ShutdownOnWriteErrorHandler);
             this.lastChannelActivityTime = DateTime.UtcNow;
-            this.KeepConnectionAlive(context);
+            this.ScheduleKeepConnectionAlive(context);
 
-            this.CheckConnectTimeout(context);
+            this.ScheduleCheckConnectTimeout(context);
         }
 
-        async void KeepConnectionAlive(IChannelHandlerContext context)
+        async void ScheduleKeepConnectionAlive(IChannelHandlerContext context)
         {
             try
             {
@@ -240,7 +227,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        async void CheckConnectTimeout(IChannelHandlerContext context)
+        async void ScheduleCheckConnectTimeout(IChannelHandlerContext context)
         {
             try
             {
@@ -280,49 +267,60 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 await Util.WriteMessageAsync(context, PingReqPacket.Instance, ShutdownOnWriteErrorHandler);
             }
 
-            self.KeepConnectionAlive(context);
+            self.ScheduleKeepConnectionAlive(context);
         }
 
-        async void ProcessConnectAck(IChannelHandlerContext context, ConnAckPacket packet)
+        void ProcessConnectAck(IChannelHandlerContext context, ConnAckPacket packet)
         {
-            try
+            if (packet.ReturnCode != ConnectReturnCode.Accepted)
             {
-                if (packet.ReturnCode != ConnectReturnCode.Accepted)
-                {
-                    string reason = "CONNECT failed: " + packet.ReturnCode;
-                    var iotHubException = new IotHubException(reason);
-                    ShutdownOnError(context, iotHubException);
-                    return;
-                }
-
-                if (!this.IsInState(StateFlags.Connecting))
-                {
-                    string reason = "CONNECT has been received, however a session has already been established. Only one CONNECT/CONNACK pair is expected per session.";
-                    var iotHubException = new IotHubException(reason);
-                    ShutdownOnError(context, iotHubException);
-                    return;
-                }
-
-                this.stateFlags = StateFlags.Connected;
-
-                this.ResumeReadingIfNecessary(context);
-
-                this.onConnected();
-
-                await this.SubscribeAsync(context);
+                string reason = "CONNECT failed: " + packet.ReturnCode;
+                var iotHubException = new IotHubException(reason);
+                ShutdownOnError(context, iotHubException);
+                return;
             }
-            catch (Exception ex)
+
+            if (!this.IsInState(StateFlags.Connecting))
             {
-                ShutdownOnError(context, ex);
+                string reason = "CONNECT has been received, however a session has already been established. Only one CONNECT/CONNACK pair is expected per session.";
+                var iotHubException = new IotHubException(reason);
+                ShutdownOnError(context, iotHubException);
+                return;
             }
+
+            this.stateFlags = StateFlags.Connected;
+
+            this.ResumeReadingIfNecessary(context);
+
+            this.onConnected();
         }
+        #endregion
+
+        #region Subscribe
 
         async Task SubscribeAsync(IChannelHandlerContext context)
         {
+            if (this.IsInState(StateFlags.Receiving) || this.IsInState(StateFlags.Subscribing))
+            {
+                return;
+            }
+
+            this.stateFlags |= StateFlags.Subscribing;
+
+            this.subscribeCompletion = new TaskCompletionSource();
             string topicFilter = TelemetryTopicFilterFormat.FormatInvariant(this.deviceId);
             var subscribePacket = new SubscribePacket(Util.GetNextPacketId(), new SubscriptionRequest(topicFilter, this.mqttTransportSettings.ReceivingQoS));
 
             await Util.WriteMessageAsync(context, subscribePacket, ShutdownOnWriteErrorHandler);
+
+            await this.subscribeCompletion.Task;
+        }
+
+        void ProcessSubAck()
+        {
+            this.stateFlags &= ~StateFlags.Subscribing;
+            this.stateFlags |= StateFlags.Receiving;
+            this.subscribeCompletion.TryComplete();
         }
 
         #endregion
@@ -342,7 +340,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                     this.ProcessConnectAck(context, (ConnAckPacket)packet);
                     break;
                 case PacketType.SUBACK:
-                    this.maxSupportedQos = ((SubAckPacket)packet).ReturnCodes[0];
+                    this.ProcessSubAck();
                     break;
                 case PacketType.PUBLISH:
                     this.ProcessPublish(context, (PublishPacket)packet);
@@ -379,7 +377,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
             finally
             {
-                publish.Payload.Release();
+                publish.Release();
             }
             this.onMessageReceived(message);
             return TaskConstants.Completed;
@@ -416,18 +414,18 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         async Task SendMessageAsync(IChannelHandlerContext context, Message message)
         {
+            await this.SubscribeAsync(context);
+
             string topicName = string.Format(TopicFormat, this.deviceId);
 
-            QualityOfService qos = this.PublishToServerQualityOfService;
-
-            PublishPacket packet = await Util.ComposePublishPacketAsync(context, message, qos, topicName);
+            PublishPacket packet = await Util.ComposePublishPacketAsync(context, message, this.mqttTransportSettings.PublishToServerQoS, topicName);
             var publishCompletion = new TaskCompletionSource();
             var workItem = new PublishWorkItem
             {
                 Completion = publishCompletion,
-                Packet = packet
+                Value = packet
             };
-            switch (qos)
+            switch (this.mqttTransportSettings.PublishToServerQoS)
             {
                 case QualityOfService.AtMostOnce:
                     this.serviceBoundOneWayProcessor.Post(context, workItem);
@@ -436,7 +434,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                     this.serviceBoundTwoWayProcessor.Post(context, workItem);
                     break;
                 default:
-                    throw new NotSupportedException(string.Format("Unsupported telemetry QoS: '{0}'", qos));
+                    throw new NotSupportedException($"Unsupported telemetry QoS: '{this.mqttTransportSettings.PublishToServerQoS}'");
             }
             await publishCompletion.Task;
         }
@@ -465,8 +463,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
             try
             {
-                await Util.WriteMessageAsync(context, publish.Packet, ShutdownOnWriteErrorHandler);
-                if (publish.Packet.QualityOfService == QualityOfService.AtMostOnce)
+                await Util.WriteMessageAsync(context, publish.Value, ShutdownOnWriteErrorHandler);
+                if (publish.Value.QualityOfService == QualityOfService.AtMostOnce)
                 {
                     publish.Completion.TryComplete();
                 }
@@ -474,6 +472,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             catch (Exception ex)
             {
                 publish.Completion.TrySetException(ex);
+            }
+            finally
+            {
+                publish.Release();
             }
         }
         #endregion

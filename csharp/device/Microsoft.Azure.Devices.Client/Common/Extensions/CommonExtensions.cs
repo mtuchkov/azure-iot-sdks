@@ -5,18 +5,17 @@ namespace Microsoft.Azure.Devices.Client.Extensions
 {
     using System;
     using System.Collections.Generic;
-    using System.Globalization;
     using System.Linq;
     using System.Net;
     using System.Net.Http;
     using System.Net.Sockets;
     using System.Text;
-    using System.Text.RegularExpressions;
+
 #if !WINDOWS_UWP // Owin NuGet package is not compatible with UAP
     using Microsoft.Owin;
 #endif
 
-    delegate bool TryParse<TInput, TOutput>(TInput input, bool ignoreCase, out TOutput output);
+    delegate bool TryParse<in TInput, TOutput>(TInput input, bool ignoreCase, out TOutput output);
 
     static class CommonExtensionMethods
     {
@@ -27,7 +26,7 @@ namespace Microsoft.Azure.Devices.Client.Extensions
         {
             if (value == null)
             {
-                throw new ArgumentNullException("value");
+                throw new ArgumentNullException(nameof(value));
             }
 
             if (value.Length == 0)
@@ -178,28 +177,30 @@ namespace Microsoft.Azure.Devices.Client.Extensions
         {
             if (str == null)
             {
-                throw new ArgumentNullException("str");
+                throw new ArgumentNullException(nameof(str));
             }
-            if (startIndex < 0)
+            if (startIndex < 0 || startIndex >= str.Length)
             {
-                throw new ArgumentOutOfRangeException("startIndex");
+                throw new ArgumentOutOfRangeException(nameof(startIndex));
             }
             if (n <= 0)
             {
-                throw new ArgumentOutOfRangeException("n");
+                throw new ArgumentOutOfRangeException(nameof(n));
             }
-
-            startIndex--;
+            
+            int entryIndex = -1;
+            int nextSearchStartIndex = startIndex;
             for (int i = 0; i < n; i++)
             {
-                startIndex++;
-                if (startIndex >= str.Length || (startIndex = str.IndexOf(value, startIndex)) < 0)
+                entryIndex = str.IndexOf(value, nextSearchStartIndex);
+                if (entryIndex < 0)
                 {
                     return -1;
                 }
+                nextSearchStartIndex = entryIndex + 1;
             }
             
-            return startIndex;
+            return entryIndex;
         }
     }
 }

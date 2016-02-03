@@ -19,9 +19,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 this.Id = id;
             }
 
-            public TWork WorkItem { get; set; }
+            public TWork WorkItem { get; }
 
-            public TWorkId Id { get; set; }
+            public TWorkId Id { get; }
         }
 
         readonly Func<TWork, TWorkId> getWorkId;
@@ -41,9 +41,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 throw new IotHubClientException("Nothing to complete.");
             }
-            IncompleteWorkItem incompleteWorkItem = this.incompleteQueue.Dequeue();
+            IncompleteWorkItem incompleteWorkItem = this.incompleteQueue.Peek();
             if (incompleteWorkItem.Id.Equals(workId))
             {
+                this.incompleteQueue.Dequeue();
                 return this.completeWork(context, incompleteWorkItem.WorkItem);
             }
             throw new IotHubClientException($"Work must be complete in the same order as it was started. Expected work id: '{incompleteWorkItem.Id}', actual work id: '{workId}'");
