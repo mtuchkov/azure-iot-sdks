@@ -28,10 +28,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         [Flags]
         enum StateFlags: long
         {
-            Closed = 0,
-            Open = 1,
-            Closing = 2,
-            Error = 4,
+            Error = 0,
+            Closing = 1,
+            Closed = 2,
+            Open = 4,
+            Receiving = 8,
         }
 
         readonly Bootstrap bootstrap;
@@ -44,6 +45,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly object syncRoot = new object();
         readonly SemaphoreSlim receivingSemaphore = new SemaphoreSlim(0);
         readonly CancellationTokenSource disconnectAwaitersCancellationSource = new CancellationTokenSource();
+        readonly TaskCompletionSource subscribeCompletionSource = new TaskCompletionSource();
 
         StateFlags State
         {
@@ -208,6 +210,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         protected override async Task<Message> OnReceiveAsync(TimeSpan timeout)
         {
             this.ThrowIfNotOpen();
+
+            await this.SubscribeAsync();
+
             try
             {
                 await this.receivingSemaphore.WaitAsync(timeout, this.disconnectAwaitersCancellationSource.Token);
@@ -228,6 +233,26 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             catch (OperationCanceledException)
             {
                 return null;
+            }
+        }
+
+        async Task SubscribeAsync()
+        {
+            if (Interlocked.CompareExchange(ref this.transportStatus, (long)StateFlags.Receiving, (long)StateFlags.Open) == (long)StateFlags.Open)
+            {
+                try
+                {
+                    await this.channel.WriteAsync(new SubscribePacket());
+                    this.subscribeCompletionSource.TryComplete();
+                }
+                catch (Exception ex)
+                {
+                    this.subscribeCompletionSource.TrySetException(ex);
+                }
+            }
+            else
+            {
+                await this.subscribeCompletionSource.Task;
             }
         }
 
@@ -284,18 +309,20 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         async void OnError(Exception exception)
         {
-            if (this.transportException == exception)
-            {
-                return;
-            }
             this.transportException = exception;
 
             try
             {
-                TaskStatus taskStatus = this.connectCompletion.Task.Status;
-                if (this.State == StateFlags.Closed && taskStatus != TaskStatus.RanToCompletion && taskStatus != TaskStatus.Faulted && taskStatus != TaskStatus.Canceled)
+                if (this.State == StateFlags.Closed)
                 {
-                    this.connectCompletion.TrySetException(exception);
+                    if (!this.connectCompletion.Task.IsCompleted)
+                    {
+                        this.connectCompletion.TrySetException(exception);
+                    }
+                    if (!this.subscribeCompletionSource.Task.IsCompleted)
+                    {
+                        this.subscribeCompletionSource.TrySetException(exception);
+                    }
                 }
                 await this.OnCloseAsync();
             }
@@ -322,17 +349,19 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         void ThrowIfNotOpen()
         {
-            var state = this.State;
+            StateFlags state = this.State;
 
-            if (state != StateFlags.Open)
+            if (state >= StateFlags.Open)
             {
-                if (state == StateFlags.Error)
-                {
-                    throw this.transportException;
-                }
-
-                throw new IotHubCommunicationException("Connection is closed.");
+                return;
             }
+
+            if (state == StateFlags.Error)
+            {
+                throw this.transportException;
+            }
+
+            throw new IotHubCommunicationException("Connection is closed.");
         }
     }
 }

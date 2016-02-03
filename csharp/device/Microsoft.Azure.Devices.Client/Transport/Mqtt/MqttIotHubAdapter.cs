@@ -121,9 +121,14 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 return this.AcknowledgeAsync(context, packetIdString);
             }
 
-            if (data is Packet)
+            if (data is DisconnectPacket)
             {
                 return Util.WriteMessageAsync(context, data, ShutdownOnWriteErrorHandler);
+            }
+
+            if (data is SubscribePacket)
+            {
+                return this.SubscribeAsync(context);
             }
 
             throw new InvalidOperationException($"Unexpected data type: '{data.GetType().Name}'");
@@ -199,7 +204,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             };
             if (connectPacket.HasWill)
             {
-                PublishPacket will = await Util.ComposePublishPacketAsync(context, this.willMessage.Message, this.mqttTransportSettings.PublishToServerQoS, string.Format(TopicFormat, this.deviceId));
+                Message message = this.willMessage.Message;
+                QualityOfService publishToServerQoS = this.mqttTransportSettings.PublishToServerQoS;
+                string topicName = string.Format(TopicFormat, this.deviceId);
+                PublishPacket will = await Util.ComposePublishPacketAsync(context, message, publishToServerQoS, topicName);
 
                 connectPacket.WillMessage = will.Payload;
                 connectPacket.WillQualityOfService = this.willMessage.QoS;
@@ -308,7 +316,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.stateFlags |= StateFlags.Subscribing;
 
             this.subscribeCompletion = new TaskCompletionSource();
+
             string topicFilter = TelemetryTopicFilterFormat.FormatInvariant(this.deviceId);
+
             var subscribePacket = new SubscribePacket(Util.GetNextPacketId(), new SubscriptionRequest(topicFilter, this.mqttTransportSettings.ReceivingQoS));
 
             await Util.WriteMessageAsync(context, subscribePacket, ShutdownOnWriteErrorHandler);
@@ -414,8 +424,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         async Task SendMessageAsync(IChannelHandlerContext context, Message message)
         {
-            await this.SubscribeAsync(context);
-
             string topicName = string.Format(TopicFormat, this.deviceId);
 
             PublishPacket packet = await Util.ComposePublishPacketAsync(context, message, this.mqttTransportSettings.PublishToServerQoS, topicName);
