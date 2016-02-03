@@ -487,12 +487,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         static void ShutdownOnError(IChannelHandlerContext context, Exception exception)
         {
             ShutdownOnError(context);
-            
+
             var self = (MqttIotHubAdapter)context.Handler;
-            if (!self.subscribeCompletion.Task.IsCompleted)
-            {
-                self.subscribeCompletion.TrySetException(exception);
-            }
+            self.subscribeCompletion.TrySetException(exception);
             self.onError(exception);
         }
 

@@ -16,7 +16,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using DotNetty.Transport.Bootstrapping;
     using DotNetty.Transport.Channels;
     using DotNetty.Transport.Channels.Sockets;
-    using Microsoft.Azure.Devices.Client.Common;
     using Microsoft.Azure.Devices.Client.Exceptions;
     using Microsoft.Azure.Devices.Client.Extensions;
     using TransportType = Microsoft.Azure.Devices.Client.TransportType;
@@ -34,6 +33,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             Open = 4,
             Receiving = 8,
         }
+
+        static readonly TimeSpan DefaultReceiveTimeoutInSeconds = TimeSpan.FromMinutes(1);
 
         readonly Bootstrap bootstrap;
         readonly IPAddress serverAddress;
@@ -57,7 +58,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         IChannel channel;
         long transportStatus = (long)StateFlags.Closed;
         Exception transportException;
-        public static readonly TimeSpan DefaultReceiveTimeoutInSeconds = TimeSpan.FromSeconds(20);
 
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString)
             : this(iotHubConnectionString, new MqttTransportSettings(TransportType.Mqtt))
@@ -96,10 +96,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             this.ScheduleCleanup(async () =>
             {
-                if (!this.connectCompletion.Task.IsCompleted)
-                {
-                    this.connectCompletion.TrySetCanceled();
-                }
+                this.connectCompletion.TrySetCanceled();
                 await group.ShutdownGracefullyAsync();
             });
 
@@ -313,14 +310,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             try
             {
-                if (!this.connectCompletion.Task.IsCompleted)
-                {
-                    this.connectCompletion.TrySetException(exception);
-                }
-                if (!this.subscribeCompletionSource.Task.IsCompleted)
-                {
-                    this.subscribeCompletionSource.TrySetException(exception);
-                }
+                this.connectCompletion.TrySetException(exception);
+                this.subscribeCompletionSource.TrySetException(exception);
                 await this.OnCloseAsync();
             }
             catch (Exception ex)
