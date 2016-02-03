@@ -313,16 +313,13 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             try
             {
-                if (this.State == StateFlags.Closed)
+                if (!this.connectCompletion.Task.IsCompleted)
                 {
-                    if (!this.connectCompletion.Task.IsCompleted)
-                    {
-                        this.connectCompletion.TrySetException(exception);
-                    }
-                    if (!this.subscribeCompletionSource.Task.IsCompleted)
-                    {
-                        this.subscribeCompletionSource.TrySetException(exception);
-                    }
+                    this.connectCompletion.TrySetException(exception);
+                }
+                if (!this.subscribeCompletionSource.Task.IsCompleted)
+                {
+                    this.subscribeCompletionSource.TrySetException(exception);
                 }
                 await this.OnCloseAsync();
             }

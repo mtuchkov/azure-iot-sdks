@@ -210,7 +210,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 long streamLength = payloadStream.Length;
                 if (streamLength > MaxPayloadSize)
                 {
-                    throw new InvalidOperationException($"Message size ({streamLength} bytes) is too big to process. Maximum payload size is {MaxPayloadSize}");
+                    throw new InvalidOperationException($"Message size ({streamLength} bytes) is too big to process. Maximum allowed payload size is {MaxPayloadSize}");
                 }
 
                 int length = (int)streamLength;

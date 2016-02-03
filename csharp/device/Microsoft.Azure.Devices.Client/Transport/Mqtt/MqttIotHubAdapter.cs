@@ -4,7 +4,6 @@
 namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 {
     using System;
-    using System.Collections.Generic;
     using System.Diagnostics.Contracts;
     using System.IO;
     using System.Threading.Tasks;
@@ -490,6 +489,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             ShutdownOnError(context);
             
             var self = (MqttIotHubAdapter)context.Handler;
+            if (!self.subscribeCompletion.Task.IsCompleted)
+            {
+                self.subscribeCompletion.TrySetException(exception);
+            }
             self.onError(exception);
         }
 
