@@ -29,8 +29,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             Receiving = 8,
             Closed = 16
         }
-        const string TelemetryTopicFilterFormat = "devices/{0}/messages/devicebound/#";
-        const string TopicFormat = "devices/{0}/messages/events/";
+        const string CommandTopicFilterFormat = "devices/{0}/messages/devicebound/#";
+        const string TelemetryTopicFormat = "devices/{0}/messages/events/";
             
 
         static readonly Action<object> PingServerCallback = PingServer;
@@ -205,7 +205,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 Message message = this.willMessage.Message;
                 QualityOfService publishToServerQoS = this.mqttTransportSettings.PublishToServerQoS;
-                string topicName = string.Format(TopicFormat, this.deviceId);
+                string topicName = string.Format(TelemetryTopicFormat, this.deviceId);
                 PublishPacket will = await Util.ComposePublishPacketAsync(context, message, publishToServerQoS, topicName);
 
                 connectPacket.WillMessage = will.Payload;
@@ -316,7 +316,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             this.subscribeCompletion = new TaskCompletionSource();
 
-            string topicFilter = TelemetryTopicFilterFormat.FormatInvariant(this.deviceId);
+            string topicFilter = CommandTopicFilterFormat.FormatInvariant(this.deviceId);
 
             var subscribePacket = new SubscribePacket(Util.GetNextPacketId(), new SubscriptionRequest(topicFilter, this.mqttTransportSettings.ReceivingQoS));
 
@@ -423,7 +423,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         async Task SendMessageAsync(IChannelHandlerContext context, Message message)
         {
-            string topicName = string.Format(TopicFormat, this.deviceId);
+            string topicName = string.Format(TelemetryTopicFormat, this.deviceId);
 
             PublishPacket packet = await Util.ComposePublishPacketAsync(context, message, this.mqttTransportSettings.PublishToServerQoS, topicName);
             var publishCompletion = new TaskCompletionSource();
