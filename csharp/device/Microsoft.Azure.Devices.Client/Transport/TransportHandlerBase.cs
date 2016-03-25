@@ -12,7 +12,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
     /// <summary>
     /// Contains the implementation of methods that a device can use to send messages to and receive from the service.
     /// </summary>
-    abstract class TransportHandlerBase
+    abstract class TransportHandlerBase : IDisposable
     {
         bool openCalled;
         bool closeCalled;
@@ -54,10 +54,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
                 this.closeCalled = true;
             }
 
-            if (localOpenTaskCompletionSource != null)
-            {
-                localOpenTaskCompletionSource.TrySetCanceled();
-            }
+            localOpenTaskCompletionSource?.TrySetCanceled();
 
             return this.OnCloseAsync();
         }
@@ -297,5 +294,17 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
         protected abstract Task OnSendEventAsync(IEnumerable<Message> messages);
 
+        protected abstract void Dispose(bool disposing);
+
+        public void Dispose()
+        {
+            this.Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        ~TransportHandlerBase()
+        {
+            this.Dispose(false);
+        }
     }
 }

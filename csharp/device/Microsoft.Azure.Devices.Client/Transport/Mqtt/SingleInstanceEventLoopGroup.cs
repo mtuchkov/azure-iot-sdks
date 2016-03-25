@@ -3,34 +3,68 @@
 
 namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 {
+    using System;
+    using System.Collections.Generic;
     using System.Threading.Tasks;
     using DotNetty.Transport.Channels;
+    using Microsoft.Azure.Devices.Client.Common;
 
-    class SingleInstanceEventLoopGroup : IEventLoopGroup
+    class EventLoopGroupPool
     {
-        readonly SingleThreadEventLoop eventLoop;
+        static readonly int PoolSize = Environment.ProcessorCount * 2;
+        static long counter = -1;
+        static readonly object SyncRoot = new object();
 
-        public SingleInstanceEventLoopGroup()
+        public static readonly EventLoopGroupPool Instance;
+
+        readonly MultithreadEventLoopGroup[] eventLoopGroups = new MultithreadEventLoopGroup[PoolSize];
+
+        static EventLoopGroupPool()
         {
-            this.eventLoop = new SingleThreadEventLoop();
+            Instance = new EventLoopGroupPool();
         }
 
-        public IEventLoop GetNext()
+        EventLoopGroupPool()
         {
-            return this.eventLoop;
+            
         }
 
-        public Task ShutdownGracefullyAsync()
+        public IEventLoopGroup GetNext()
         {
-            return this.eventLoop.ShutdownGracefullyAsync();
-        }
-
-        public Task TerminationCompletion
-        {
-            get
+            lock (SyncRoot)
             {
-                return this.eventLoop.TerminationCompletion;
+                counter++;
+
+                if (counter >= PoolSize)
+                {
+                    return this.eventLoopGroups[counter % PoolSize];
+                }
+
+                if (this.eventLoopGroups[counter] == null)
+                {
+                    this.eventLoopGroups[counter] = new MultithreadEventLoopGroup(() => new SingleThreadEventLoop("MQTTClientExecutionThread_" + counter, TimeSpan.FromMilliseconds(100)), 1);
+                }
+
+                return this.eventLoopGroups[counter % PoolSize];
             }
+        }
+
+        public Task DisposeAsync()
+        {
+            var cleanupTasks = new List<Task>();
+            lock (SyncRoot)
+            {
+                counter--;
+                if (counter < 0)
+                {
+                    for (int i = 1; i < PoolSize; i++)
+                    {
+                        cleanupTasks.Add(this.eventLoopGroups[i].ShutdownGracefullyAsync());
+                        this.eventLoopGroups[i] = null;
+                    }
+                }
+            }
+            return cleanupTasks.Count > 0 ? Task.WhenAll(cleanupTasks) : TaskConstants.Completed;
         }
     }
 }

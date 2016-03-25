@@ -489,7 +489,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             ShutdownOnError(context);
 
             var self = (MqttIotHubAdapter)context.Handler;
-            self.subscribeCompletion.TrySetException(exception);
+            self.subscribeCompletion?.TrySetException(exception);
             self.onError(exception);
         }
 

@@ -63,7 +63,7 @@ namespace Microsoft.Azure.Devices.Client
     /// <summary>
     /// Contains methods that a device can use to send messages to and receive from the service.
     /// </summary>
-    public sealed class DeviceClient
+    public sealed class DeviceClient: IDisposable
     {
         const string DeviceId = "DeviceId";
         const string DeviceIdParameterPattern = @"(^\s*?|.*;\s*?)" + DeviceId + @"\s*?=.*";
@@ -724,5 +724,10 @@ namespace Microsoft.Azure.Devices.Client
             throw lastException;
         }
 #endif
+
+        public void Dispose()
+        {
+            this.impl?.Dispose();
+        }
     }
 }

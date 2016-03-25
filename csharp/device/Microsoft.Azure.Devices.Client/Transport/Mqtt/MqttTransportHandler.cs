@@ -32,6 +32,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             Closed = 2,
             Open = 4,
             Receiving = 8,
+            Disposed = 16
         }
 
         static readonly TimeSpan DefaultReceiveTimeoutInSeconds = TimeSpan.FromMinutes(1);
@@ -47,6 +48,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly SemaphoreSlim receivingSemaphore = new SemaphoreSlim(0);
         readonly CancellationTokenSource disconnectAwaitersCancellationSource = new CancellationTokenSource();
         readonly TaskCompletionSource subscribeCompletionSource = new TaskCompletionSource();
+        readonly CancellationTokenSource disposeCancellationTokenSource = new CancellationTokenSource();
 
         StateFlags State
         {
@@ -73,11 +75,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.messageQueue = new ConcurrentQueue<Message>();
             this.completionQueue = new Queue<string>();
             this.serverAddress = Dns.GetHostEntry(iotHubConnectionString.HostName).AddressList[0];
-            var group = new SingleInstanceEventLoopGroup();
             this.qos = settings.PublishToServerQoS;
 
             this.bootstrap = new Bootstrap()
-                .Group(@group)
+                .Group(EventLoopGroupPool.Instance.GetNext())
                 .Channel<TcpSocketChannel>()
                 .Option(ChannelOption.TcpNodelay, true)
                 .Handler(new ActionChannelInitializer<ISocketChannel>(ch =>
@@ -97,8 +98,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.ScheduleCleanup(async () =>
             {
                 this.connectCompletion.TrySetCanceled();
-                await group.ShutdownGracefullyAsync();
+                await EventLoopGroupPool.Instance.DisposeAsync();
             });
+
+            this.disposeCancellationTokenSource.Token.Register(() => this.cleanupFunc());
 
         }
 
@@ -112,12 +115,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             if (hostname == null)
             {
-                throw new ArgumentNullException("hostname");
+                throw new ArgumentNullException(nameof(hostname));
             }
 
             if (authMethod == null)
             {
-                throw new ArgumentNullException("authMethod");
+                throw new ArgumentNullException(nameof(authMethod));
             }
 
             IotHubConnectionStringBuilder connectionStringBuilder = IotHubConnectionStringBuilder.Create(hostname, authMethod);
@@ -133,7 +136,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             if (connectionString == null)
             {
-                throw new ArgumentNullException("connectionString");
+                throw new ArgumentNullException(nameof(connectionString));
             }
 
             IotHubConnectionString iotHubConnectionString = IotHubConnectionString.Parse(connectionString);
@@ -146,6 +149,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         #region Client operations
         protected override async Task OnOpenAsync(bool explicitOpen)
         {
+            if (this.State >= StateFlags.Open)
+            {
+                return;
+            }
             try
             {
                 this.channel = await this.bootstrap.ConnectAsync(this.serverAddress, ProtocolGatewayPort);
@@ -172,7 +179,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         protected override async Task OnCloseAsync()
         {
-            this.ThrowIfNotOpen();
+            this.ThrowIfNotInStates(StateFlags.Open | StateFlags.Receiving);
             try
             {
                 this.State = StateFlags.Closing;
@@ -189,14 +196,14 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         protected override async Task OnSendEventAsync(Message message)
         {
-            this.ThrowIfNotOpen();
+            this.ThrowIfNotInStates(StateFlags.Open | StateFlags.Receiving);
 
             await this.channel.WriteAndFlushAsync(message);
         }
 
         protected override async Task OnSendEventAsync(IEnumerable<Message> messages)
         {
-            this.ThrowIfNotOpen();
+            this.ThrowIfNotInStates(StateFlags.Open | StateFlags.Receiving);
 
             foreach (Message message in messages)
             {
@@ -204,9 +211,34 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
+        protected override void Dispose(bool disposing)
+        {
+            this.State = StateFlags.Closing;
+            if (disposing)
+            {
+                if (Interlocked.CompareExchange(ref this.transportStatus, (long)StateFlags.Disposed, (long)StateFlags.Open) == (long)StateFlags.Open)
+                {
+                    this.disconnectAwaitersCancellationSource.Cancel();
+                    this.subscribeCompletionSource.TrySetCanceled();
+                }
+                else if (Interlocked.CompareExchange(ref this.transportStatus, (long)StateFlags.Disposed, (long)StateFlags.Receiving) == (long)StateFlags.Receiving)
+                {
+                    this.disconnectAwaitersCancellationSource.Cancel();
+                }
+                else
+                {
+                    this.State = StateFlags.Disposed;
+                    this.connectCompletion.TrySetCanceled();
+                    this.subscribeCompletionSource.TrySetCanceled();
+                }
+            }
+            this.State = StateFlags.Disposed;
+            this.disposeCancellationTokenSource.Cancel();
+        }
+
         protected override async Task<Message> OnReceiveAsync(TimeSpan timeout)
         {
-            this.ThrowIfNotOpen();
+            this.ThrowIfNotInStates((StateFlags.Open | StateFlags.Receiving));
 
             await this.SubscribeAsync();
 
@@ -255,7 +287,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         protected override async Task OnCompleteAsync(string lockToken)
         {
-            this.ThrowIfNotOpen();
+            this.ThrowIfNotInStates((StateFlags.Open | StateFlags.Receiving));
             if (this.qos == QualityOfService.AtMostOnce)
             {
                 throw new InvalidOperationException("Complete is not allowed for QoS 0.");
@@ -335,11 +367,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             };
         }
 
-        void ThrowIfNotOpen()
+        void ThrowIfNotInStates(StateFlags states)
         {
             StateFlags state = this.State;
 
-            if (state >= StateFlags.Open)
+            if ((state | states) > 0)
             {
                 return;
             }
@@ -347,6 +379,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             if (state == StateFlags.Error)
             {
                 throw this.transportException;
+            }
+
+            if (state == StateFlags.Disposed)
+            {
+                throw new ObjectDisposedException(this.GetType().Name);
             }
 
             throw new IotHubCommunicationException("Connection is closed.");

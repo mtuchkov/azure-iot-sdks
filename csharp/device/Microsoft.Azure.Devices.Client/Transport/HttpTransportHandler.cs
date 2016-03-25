@@ -153,6 +153,14 @@ namespace Microsoft.Azure.Devices.Client.Transport
                 CancellationToken.None);
         }
 
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                this.httpClientHelper?.Dispose();
+            }
+        }
+
         internal Task SendEventAsync(IEnumerable<string> messages)
         {
             var customHeaders = PrepareCustomHeaders(CommonConstants.DeviceEventPathTemplate.FormatInvariant(this.deviceId), string.Empty, CommonConstants.DeviceToCloudOperation);
