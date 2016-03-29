@@ -110,6 +110,14 @@
     <Reference Include="System" />
     <Reference Include="System.configuration" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Data.HashFunction.Core, Version=1.8.2.2, Culture=neutral, PublicKeyToken=80c9288e394c1322, processorArchitecture=MSIL">
+      <HintPath>..\packages\System.Data.HashFunction.Core.1.8.2.2\lib\net45\System.Data.HashFunction.Core.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Data.HashFunction.Interfaces, Version=1.0.0.2, Culture=neutral, PublicKeyToken=80c9288e394c1322, processorArchitecture=MSIL">
+      <HintPath>..\packages\System.Data.HashFunction.Interfaces.1.0.0.2\lib\net45\System.Data.HashFunction.Interfaces.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Net.Http.Formatting, Version=5.2.3.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
       <HintPath>..\packages\Microsoft.AspNet.WebApi.Client.5.2.3\lib\net45\System.Net.Http.Formatting.dll</HintPath>
@@ -128,10 +136,16 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AmqpConnectionPoolSettings.cs" />
     <Compile Include="Common\Exceptions\IotHubClientException.cs" />
     <Compile Include="AmqpTransportSettings.cs" />
     <Compile Include="Common\TaskConstants.cs" />
     <Compile Include="Common\TaskUtils.cs" />
+    <Compile Include="IotHubDeviceScopeConnectionPool.cs" />
+    <Compile Include="IotHubScopeConnectionPool.cs" />
+    <Compile Include="IotHubSingleTokenConnection.cs" />
+    <Compile Include="IotHubMuxConnection.cs" />
+    <Compile Include="IotHubTokenRefresher.cs" />
     <Compile Include="Transport\AmqpClientHelper.cs" />
     <Compile Include="Common\UrlEncodedDictionarySerializer.cs" />
     <Compile Include="Common\ActionItem.cs" />
@@ -197,6 +211,7 @@
     <Compile Include="Common\Fx.cs" />
     <Compile Include="Common\FxTrace.cs" />
     <Compile Include="Common\HashCode.cs" />
+    <Compile Include="Transport\Mqtt\ConcurrentObjectPool.cs" />
     <Compile Include="Transport\Mqtt\ICancellable.cs" />
     <Compile Include="Transport\Mqtt\ISessionContextProvider.cs" />
     <Compile Include="Http1TransportSettings.cs" />
@@ -243,7 +258,6 @@
     <Compile Include="DeviceClient.cs" />
     <Compile Include="Transport\Mqtt\ChannelMessageProcessingException.cs" />
     <Compile Include="Transport\Mqtt\MqttTransportSettings.cs" />
-    <Compile Include="Transport\Mqtt\SingleInstanceEventLoopGroup.cs" />
     <Compile Include="Transport\Mqtt\Util.cs" />
     <Compile Include="Transport\Mqtt\WillMessage.cs" />
     <Compile Include="Transport\TransportHandlerBase.cs" />

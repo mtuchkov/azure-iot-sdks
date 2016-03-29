@@ -486,11 +486,13 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         #region Shutdown
         static void ShutdownOnError(IChannelHandlerContext context, Exception exception)
         {
-            ShutdownOnError(context);
-
             var self = (MqttIotHubAdapter)context.Handler;
-            self.subscribeCompletion?.TrySetException(exception);
-            self.onError(exception);
+            if (!self.IsInState(StateFlags.Closed))
+            {
+                ShutdownOnError(context);
+                self.subscribeCompletion?.TrySetException(exception);
+                self.onError(exception);
+            }
         }
 
         /// <summary>

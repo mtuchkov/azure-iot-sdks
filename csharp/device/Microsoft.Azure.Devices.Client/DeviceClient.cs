@@ -63,7 +63,10 @@ namespace Microsoft.Azure.Devices.Client
     /// <summary>
     /// Contains methods that a device can use to send messages to and receive from the service.
     /// </summary>
-    public sealed class DeviceClient: IDisposable
+    public sealed class DeviceClient
+#if !WINDOWS_UWP && !PCL
+       : IDisposable
+#endif
     {
         const string DeviceId = "DeviceId";
         const string DeviceIdParameterPattern = @"(^\s*?|.*;\s*?)" + DeviceId + @"\s*?=.*";
@@ -75,13 +78,13 @@ namespace Microsoft.Azure.Devices.Client
 
         static readonly Regex DeviceIdParameterRegex = new Regex(DeviceIdParameterPattern, RegexOptions);
         TransportHandlerBase impl;
+        bool closeCalled;
 #if !WINDOWS_UWP && !PCL
         readonly IotHubConnectionString iotHubConnectionString;
         readonly ITransportSettings[] transportSettings;
         readonly object thisLock = new object();
 
         volatile TaskCompletionSource<object> openTaskCompletionSource;
-        bool openCalled;
 
         DeviceClient(IotHubConnectionString iotHubConnectionString, ITransportSettings[] transportSettings)
         {
@@ -106,7 +109,11 @@ namespace Microsoft.Azure.Devices.Client
         /// <returns>DeviceClient</returns>
         public static DeviceClient Create(string hostname, IAuthenticationMethod authenticationMethod)
         {
+#if WINDOWS_UWP
+            return Create(hostname, authenticationMethod, TransportType.Http1);
+#else
             return Create(hostname, authenticationMethod, TransportType.Amqp);
+#endif
         }
 
         /// <summary>
@@ -175,7 +182,7 @@ namespace Microsoft.Azure.Devices.Client
         /// <returns>DeviceClient</returns>
         public static DeviceClient CreateFromConnectionString(string connectionString, TransportType transportType)
         {
-            if (connectionString  == null)
+            if (connectionString == null)
             {
                 throw new ArgumentNullException("connectionString");
             }
@@ -339,6 +346,10 @@ namespace Microsoft.Azure.Devices.Client
         /// </summary>
         public AsyncTask OpenAsync()
         {
+            if (this.closeCalled)
+            {
+                throw new ObjectDisposedException("DeviceClient object is closed.");
+            }
 #if WINDOWS_UWP || PCL
             return impl.OpenAsync().AsTaskOrAsyncOp();
 #else
@@ -352,6 +363,7 @@ namespace Microsoft.Azure.Devices.Client
         /// <returns></returns>
         public AsyncTask CloseAsync()
         {
+            this.closeCalled = true;
 #if !WINDOWS_UWP && !PCL
             if (this.impl != null)
             {
@@ -625,6 +637,11 @@ namespace Microsoft.Azure.Devices.Client
 #if !WINDOWS_UWP && !PCL
         async Task EnsureOpenedAsync()
         {
+            if (this.closeCalled)
+            {
+                throw new ObjectDisposedException("DeviceClient object is closed");
+            }
+
             bool executeOpen = false;
             var localTcs = this.openTaskCompletionSource;
        
@@ -672,7 +689,7 @@ namespace Microsoft.Azure.Devices.Client
                 try
                 {
                     switch (transportSetting.GetTransportType())
-                    {
+                    {                    
                         case TransportType.Amqp_WebSocket_Only:
                         case TransportType.Amqp_Tcp_Only:
                             helper = new AmqpTransportHandler(this.iotHubConnectionString, transportSetting as AmqpTransportSettings);
@@ -723,11 +740,13 @@ namespace Microsoft.Azure.Devices.Client
 
             throw lastException;
         }
-#endif
 
         public void Dispose()
         {
             this.impl?.Dispose();
+            this.impl = null;
+            this.openTaskCompletionSource = null;
         }
+#endif
     }
 }

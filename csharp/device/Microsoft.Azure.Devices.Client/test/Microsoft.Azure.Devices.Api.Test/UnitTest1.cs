@@ -12,13 +12,15 @@ namespace Microsoft.Azure.Devices.Client.Test
         [TestMethod]
         public async Task CreateTonsOfClientsSuccessfully()
         {
-            var clientTests =new List<Task>();
+            var clientTests = new List<Task>();
             for (int i = 0; i < 100; i++)
             {
                 clientTests.Add(RunOpenCloseTest());
             }
 
             await Task.WhenAll(clientTests);
+
+            await Task.Delay(TimeSpan.FromSeconds(20));
         }
 
         static async Task RunOpenCloseTest()

@@ -15,23 +15,21 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
     sealed class AmqpTransportHandler : TransportHandlerBase
     {
-        static readonly IotHubConnectionCache tcpConnectionCache = new IotHubConnectionCache(AccessRights.DeviceConnect);
-        static readonly IotHubConnectionCache wsConnectionCache = new IotHubConnectionCache(AccessRights.DeviceConnect);
+        static readonly IotHubConnectionCache tcpConnectionCache = new IotHubConnectionCache();
+        static readonly IotHubConnectionCache wsConnectionCache = new IotHubConnectionCache();
         readonly string deviceId;
         readonly Client.FaultTolerantAmqpObject<SendingAmqpLink> faultTolerantEventSendingLink;
         readonly Client.FaultTolerantAmqpObject<ReceivingAmqpLink> faultTolerantDeviceBoundReceivingLink;
-        readonly IotHubConnection IotHubConnection;
-        readonly TimeSpan openTimeout;
-        readonly TimeSpan operationTimeout;
         readonly uint prefetchCount;
-        readonly TransportType transportType;
+        readonly IotHubConnectionString iotHubConnectionString;
 
         int eventsDeliveryTag;
 
         public AmqpTransportHandler(IotHubConnectionString connectionString, AmqpTransportSettings transportSettings)
         {
-            this.transportType = transportSettings.GetTransportType();
-            switch (this.transportType)
+            TransportType transportType = transportSettings.GetTransportType();
+            this.deviceId = connectionString.DeviceId;
+            switch (transportType)
             {
                 case TransportType.Amqp_Tcp_Only:
                     this.IotHubConnection = tcpConnectionCache.GetConnection(connectionString, transportSettings);
@@ -40,16 +38,16 @@ namespace Microsoft.Azure.Devices.Client.Transport
                     this.IotHubConnection = wsConnectionCache.GetConnection(connectionString, transportSettings);
                     break;
                 default:
-                    throw new InvalidOperationException("Invalid Transport Type {0}".FormatInvariant(this.transportType));
+                    throw new InvalidOperationException("Invalid Transport Type {0}".FormatInvariant(transportType));
             }
             
-            this.deviceId = connectionString.DeviceId;
-            this.openTimeout = IotHubConnection.DefaultOpenTimeout;
-            this.operationTimeout = IotHubConnection.DefaultOperationTimeout;
-            this.DefaultReceiveTimeout = IotHubConnection.DefaultOperationTimeout;
+            this.OpenTimeout = transportSettings.OpenTimeout;
+            this.OperationTimeout = transportSettings.OperationTimeout;
+            this.DefaultReceiveTimeout = transportSettings.OperationTimeout;
             this.faultTolerantEventSendingLink = new Client.FaultTolerantAmqpObject<SendingAmqpLink>(this.CreateEventSendingLinkAsync, this.IotHubConnection.CloseLink);
             this.faultTolerantDeviceBoundReceivingLink = new Client.FaultTolerantAmqpObject<ReceivingAmqpLink>(this.CreateDeviceBoundReceivingLinkAsync, this.IotHubConnection.CloseLink);
             this.prefetchCount = transportSettings.PrefetchCount;
+            this.iotHubConnectionString = connectionString;
         }
 
         /// <summary>
@@ -97,45 +95,11 @@ namespace Microsoft.Azure.Devices.Client.Transport
             this.CloseAsync().Fork();
         }
 
-        public TimeSpan OpenTimeout
-        {
-            get
-            {
-                return this.openTimeout;
-            }
-        }
+        public TimeSpan OpenTimeout { get; }
 
-        public TimeSpan OperationTimeout
-        {
-            get
-            {
-                return this.operationTimeout;
-            }
-        }
+        public TimeSpan OperationTimeout { get; }
 
-        public IotHubConnection Connection
-        {
-            get
-            {
-                return this.IotHubConnection;
-            }
-        }
-
-        public AmqpLink EventSendingLink
-        {
-            get
-            {
-                return this.faultTolerantEventSendingLink.Value;
-            }
-        }
-
-        public AmqpLink DeviceBoundReceivingLink
-        {
-            get
-            {
-                return this.faultTolerantDeviceBoundReceivingLink.Value;
-            }
-        }
+        public IotHubConnection IotHubConnection { get; }
 
         protected override TimeSpan DefaultReceiveTimeout { get; set; }
 
@@ -166,15 +130,10 @@ namespace Microsoft.Azure.Devices.Client.Transport
         protected override Task OnCloseAsync()
         {
             GC.SuppressFinalize(this);
-            switch (this.transportType)
-            {
-                case TransportType.Amqp_Tcp_Only:
-                    return tcpConnectionCache.ReleaseConnectionAsync(this.Connection);
-                case TransportType.Amqp_WebSocket_Only:
-                    return wsConnectionCache.ReleaseConnectionAsync(this.Connection);
-                default:
-                    throw new InvalidOperationException("Invalid Transport Type {0}".FormatInvariant(this.transportType));
-            }
+            this.faultTolerantEventSendingLink.CloseAsync().Fork();
+            this.faultTolerantDeviceBoundReceivingLink.CloseAsync().Fork();
+            this.IotHubConnection.Release();
+            return TaskHelpers.CompletedTask;
         }
 
         protected async override Task OnSendEventAsync(Message message)
@@ -356,9 +315,9 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
         async Task<SendingAmqpLink> CreateEventSendingLinkAsync(TimeSpan timeout)
         {
-            string path = string.Format(CultureInfo.InvariantCulture, "/devices/{0}/messages/events", HttpUtility.UrlEncode(this.deviceId));
+            string path = string.Format(CultureInfo.InvariantCulture, CommonConstants.DeviceEventPathTemplate, HttpUtility.UrlEncode(this.deviceId));
 
-            return await this.IotHubConnection.CreateSendingLinkAsync(path, timeout);
+            return await this.IotHubConnection.CreateSendingLinkAsync(path, this.iotHubConnectionString, timeout);
         }
 
         async Task<ReceivingAmqpLink> GetDeviceBoundReceivingLinkAsync()
@@ -374,9 +333,9 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
         async Task<ReceivingAmqpLink> CreateDeviceBoundReceivingLinkAsync(TimeSpan timeout)
         {
-            string path = string.Format(CultureInfo.InvariantCulture, "/devices/{0}/messages/deviceBound", HttpUtility.UrlEncode(this.deviceId));
+            string path = string.Format(CultureInfo.InvariantCulture, CommonConstants.DeviceBoundPathTemplate, HttpUtility.UrlEncode(this.deviceId));
 
-            return await this.IotHubConnection.CreateReceivingLink(path, timeout, this.prefetchCount);
+            return await this.IotHubConnection.CreateReceivingLinkAsync(path, this.iotHubConnectionString, timeout, this.prefetchCount);
         }
     }
 }
