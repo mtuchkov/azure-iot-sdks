@@ -16,6 +16,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using DotNetty.Transport.Bootstrapping;
     using DotNetty.Transport.Channels;
     using DotNetty.Transport.Channels.Sockets;
+    using Microsoft.Azure.Devices.Client.Common;
     using Microsoft.Azure.Devices.Client.Exceptions;
     using Microsoft.Azure.Devices.Client.Extensions;
     using TransportType = Microsoft.Azure.Devices.Client.TransportType;
@@ -44,7 +45,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         
         static readonly TimeSpan DefaultReceiveTimeoutInSeconds = TimeSpan.FromMinutes(1);
 
-        readonly Bootstrap bootstrap;
+        readonly Func<IPAddress, int, Task<IChannel>> channelFactory;
         readonly string eventLoopGroupKey;
         readonly IPAddress serverAddress;
         readonly TaskCompletionSource connectCompletion;
@@ -67,15 +68,20 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         IChannel channel;
         long transportStatus = (long)StateFlags.NotInitialized;
         Exception transportException;
-        
+
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString)
             : this(iotHubConnectionString, new MqttTransportSettings(TransportType.Mqtt))
         {
-
         }
 
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings)
+            : this(iotHubConnectionString, settings, null)
         {
+        }
+
+        internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings, Func<IPAddress, int, Task<IChannel>> channelFactory)
+        {
+            this.channelFactory = channelFactory;
             this.DefaultReceiveTimeout = DefaultReceiveTimeoutInSeconds;
             this.connectCompletion = new TaskCompletionSource();
             this.mqttIotHubAdapterFactory = new MqttIotHubAdapterFactory(settings);
@@ -84,32 +90,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.serverAddress = Dns.GetHostEntry(iotHubConnectionString.HostName).AddressList[0];
             this.qos = settings.PublishToServerQoS;
             this.eventLoopGroupKey = iotHubConnectionString.IotHubName + "#" + iotHubConnectionString.DeviceId + "#" + iotHubConnectionString.Audience;
-            IEventLoopGroup eventLoopGroup = EventLoopGroupPool.TakeOrAdd(eventLoopGroupKey,
-                () => new MultithreadEventLoopGroup(() => new SingleThreadEventLoop("MQTTExecutionThread", TimeSpan.FromSeconds(1)), 1));
-
-            this.bootstrap = new Bootstrap()
-                .Group(eventLoopGroup)
-                .Channel<TcpSocketChannel>()
-                .Option(ChannelOption.TcpNodelay, true)
-                .Handler(new ActionChannelInitializer<ISocketChannel>(ch =>
-                {
-                    ch.Pipeline.AddLast(
-                        TlsHandler.Client(iotHubConnectionString.HostName, null),
-                        MqttEncoder.Instance,
-                        new MqttDecoder(false, 256 * 1024),
-                        this.mqttIotHubAdapterFactory.Create(
-                            this.OnConnected,
-                            this.OnMessageReceived,
-                            this.OnError, 
-                            iotHubConnectionString, 
-                            settings));
-                }));
-
-            this.ScheduleCleanup(async () =>
-            {
-                this.connectCompletion.TrySetCanceled();
-                EventLoopGroupPool.Release(this.eventLoopGroupKey);
-            });
+            this.channelFactory = channelFactory ?? this.CreateChannelFactory(iotHubConnectionString, settings);
         }
 
         /// <summary>
@@ -158,13 +139,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             if (this.TryStateTransition(StateFlags.NotInitialized, StateFlags.Opening))
             {
-                this.ThrowIfNotInStates(StateFlags.Opening | StateFlags.Open | StateFlags.Subscribing | StateFlags.Receiving);
-            }
-            else
-            {
                 try
                 {
-                    this.channel = await this.bootstrap.ConnectAsync(this.serverAddress, ProtocolGatewayPort);
+                    this.channel = await this.channelFactory(this.serverAddress, ProtocolGatewayPort);
                 }
                 catch (Exception ex)
                 {
@@ -183,7 +160,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
                 await this.connectCompletion.Task;
 
-                TryStateTransition(StateFlags.Opening, StateFlags.Open);
+                this.TryStateTransition(StateFlags.Opening, StateFlags.Open);
+            }
+            else
+            {
+                this.ThrowIfNotInStates(StateFlags.Opening | StateFlags.Open | StateFlags.Subscribing | StateFlags.Receiving);
             }
         }
 
@@ -251,7 +232,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         protected override async Task<Message> OnReceiveAsync(TimeSpan timeout)
         {
-            this.ThrowIfNotInStates((StateFlags.Open | StateFlags.Receiving));
+            this.ThrowIfNotInStates(StateFlags.Open | StateFlags.Receiving);
 
             await this.SubscribeAsync();
 
@@ -280,12 +261,13 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         async Task SubscribeAsync()
         {
-            if (TryStateTransition(StateFlags.Subscribing, StateFlags.Receiving))
+            if (TryStateTransition(StateFlags.Open, StateFlags.Subscribing))
             {
                 try
                 {
                     await this.channel.WriteAsync(new SubscribePacket());
                     this.subscribeCompletionSource.TryComplete();
+                    TryStateTransition(StateFlags.Subscribing, StateFlags.Receiving);
                 }
                 catch (Exception ex)
                 {
@@ -366,6 +348,41 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
         #endregion
+
+
+
+        Func<IPAddress, int, Task<IChannel>> CreateChannelFactory(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings)
+        {
+            IEventLoopGroup eventLoopGroup = EventLoopGroupPool.TakeOrAdd(eventLoopGroupKey,
+                () => new MultithreadEventLoopGroup(() => new SingleThreadEventLoop("MQTTExecutionThread", TimeSpan.FromSeconds(1)), 1));
+
+            Bootstrap bootstrap = new Bootstrap()
+                .Group(eventLoopGroup)
+                .Channel<TcpSocketChannel>()
+                .Option(ChannelOption.TcpNodelay, true)
+                .Handler(new ActionChannelInitializer<ISocketChannel>(ch =>
+                {
+                    ch.Pipeline.AddLast(
+                        TlsHandler.Client(iotHubConnectionString.HostName, null),
+                        MqttEncoder.Instance,
+                        new MqttDecoder(false, 256 * 1024),
+                        this.mqttIotHubAdapterFactory.Create(
+                            this.OnConnected,
+                            this.OnMessageReceived,
+                            this.OnError,
+                            iotHubConnectionString,
+                            settings));
+                }));
+
+            ScheduleCleanup(() =>
+            {
+                this.connectCompletion.TrySetCanceled();
+                EventLoopGroupPool.Release(this.eventLoopGroupKey);
+                return TaskConstants.Completed;
+            });
+
+            return bootstrap.ConnectAsync;
+        }
 
         void ScheduleCleanup(Func<Task> cleanupTask)
         {
