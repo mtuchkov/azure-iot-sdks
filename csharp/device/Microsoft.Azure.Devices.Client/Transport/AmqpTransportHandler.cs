@@ -155,7 +155,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
             // List to hold messages in Amqp friendly format
             var messageList = new List<Data>();
 
-            foreach (var message in messages)
+            foreach (Message message in messages)
             {
                 using (AmqpMessage amqpMessage = message.ToAmqpMessage())
                 {
@@ -165,7 +165,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
             }
 
             Outcome outcome;
-            using (var amqpMessage = AmqpMessage.Create(messageList))
+            using (AmqpMessage amqpMessage = AmqpMessage.Create(messageList))
             {
                 amqpMessage.MessageFormat = AmqpConstants.AmqpBatchedMessageFormat;
                 outcome = await this.SendAmqpMessageAsync(amqpMessage);
