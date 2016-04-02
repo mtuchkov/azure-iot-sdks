@@ -55,7 +55,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             Disposed = 128,
             TransientError = 256,
             Fatal = 512,
-            Disposing
+            InvalidStates = Closing | Closed | Disposed | Fatal
         }
 
         static readonly ConcurrentObjectPool<string, IEventLoopGroup> EventLoopGroupPool =
@@ -66,15 +66,15 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly Func<IPAddress, int, Task<IChannel>> channelFactory;
         readonly string eventLoopGroupKey;
         readonly IPAddress serverAddress;
-        readonly ConcurrentQueue<Message> messageQueue;
+        ConcurrentQueue<Message> messageQueue;
         readonly ConcurrentQueue<string> completionQueue;
         readonly MqttIotHubAdapterFactory mqttIotHubAdapterFactory;
         readonly QualityOfService qos;
         readonly object syncRoot = new object();
-        readonly SemaphoreSlim receivingSemaphore = new SemaphoreSlim(0);
+        SemaphoreSlim receivingSemaphore = new SemaphoreSlim(0);
         readonly CancellationTokenSource disconnectAwaitersCancellationSource = new CancellationTokenSource();
         TaskCompletionSource connectCompletion = new TaskCompletionSource();
-        TaskCompletionSource reestablishConnectionCompletion = new TaskCompletionSource();
+        TaskCompletionSource resetConnectionCompletion = new TaskCompletionSource();
         TaskCompletionSource subscribeCompletionSource = new TaskCompletionSource();
 
         StateFlags State
@@ -93,6 +93,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly TimeSpan minBackoff = TimeSpan.FromMilliseconds(100);
         readonly TimeSpan deltaBackoff = TimeSpan.FromMilliseconds(100);
         readonly TimeSpan maxBackoff = TimeSpan.FromSeconds(10);
+        Exception transientException;
 
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString)
             : this(iotHubConnectionString, new MqttTransportSettings(TransportType.Mqtt))
@@ -162,41 +163,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         #region Client operations
         protected override async Task OnOpenAsync(bool explicitOpen)
         {
-            if (this.TryStateTransition(StateFlags.NotInitialized, StateFlags.Opening))
+            if (await this.TryOpenAsync())
             {
-                try
-                {
-                    this.channel = await this.channelFactory(this.serverAddress, ProtocolGatewayPort);
-                }
-                catch (Exception ex)
-                {
-                    if (ex.IsFatal())
-                    {
-                        throw;
-                    }
-                    this.connectCompletion.TrySetException(ex);
-                }
-                this.ScheduleCleanup(async () =>
-                {
-                    this.disconnectAwaitersCancellationSource.Cancel();
-                    if (this.channel.Active)
-                    {
-                        await this.channel.WriteAsync(DisconnectPacket.Instance);
-                    }
-                    if (this.channel.Open)
-                    {
-                        await this.channel.CloseAsync();
-                    }
-                });
-
-                await this.connectCompletion.Task;
-
-                this.TryStateTransition(StateFlags.Opening, StateFlags.Open);
+                return;
             }
-            else
-            {
-                await this.connectCompletion.Task;
-            }
+
+            await this.HandleInvalidState(this.State, false);
         }
 
         protected override async Task OnCloseAsync()
@@ -210,25 +182,14 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         protected override async Task OnSendEventAsync(Message message)
         {
-            try
-            {
-                await this.EnsureStateAsync(StateFlags.Open | StateFlags.Subscribing | StateFlags.Receiving);
+            await this.EnsureWorkingStatesAsync(true);
 
-                await this.channel.WriteAndFlushAsync(message);
-            }
-            catch (NullReferenceException ex)
-            {
-                if (this.channel == null)
-                {
-                    throw new NullReferenceException("Channel is null",ex);
-                }
-                throw new InvalidOperationException("Unhandled null ref", ex);
-            }
+            await this.channel.WriteAndFlushAsync(message);
         }
 
         protected override async Task OnSendEventAsync(IEnumerable<Message> messages)
         {
-            await this.EnsureStateAsync(StateFlags.Open | StateFlags.Subscribing | StateFlags.Receiving);
+            await this.EnsureWorkingStatesAsync(true);
 
             if (messages == null)
             {
@@ -249,25 +210,25 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 {
                     this.connectCompletion.TrySetCanceled();
                     this.subscribeCompletionSource.TrySetCanceled();
-                    this.reestablishConnectionCompletion.TrySetCanceled();
+                    this.resetConnectionCompletion.TrySetCanceled();
                     this.disconnectAwaitersCancellationSource.Cancel();
                 }
                 else if (previousState == StateFlags.Open || previousState == StateFlags.Subscribing)
                 {
                     this.subscribeCompletionSource.TrySetCanceled();
-                    this.reestablishConnectionCompletion.TrySetCanceled();
+                    this.resetConnectionCompletion.TrySetCanceled();
                     this.disconnectAwaitersCancellationSource.Cancel();
                 }
                 else if (previousState == StateFlags.Receiving)
                 {
-                    this.reestablishConnectionCompletion.TrySetCanceled();
+                    this.resetConnectionCompletion.TrySetCanceled();
                     this.disconnectAwaitersCancellationSource.Cancel();
                 }
                 else if (previousState == StateFlags.TransientError)
                 {
                     this.connectCompletion.TrySetCanceled();
                     this.subscribeCompletionSource.TrySetCanceled();
-                    this.reestablishConnectionCompletion.TrySetCanceled();
+                    this.resetConnectionCompletion.TrySetCanceled();
                     this.disconnectAwaitersCancellationSource.Cancel();
                 }
                 else if ((previousState & (StateFlags.Closing | StateFlags.Closed | StateFlags.Fatal | StateFlags.Disposed)) > 0)
@@ -280,9 +241,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         protected override async Task<Message> OnReceiveAsync(TimeSpan timeout)
         {
-            await this.EnsureStateAsync(StateFlags.Open | StateFlags.Subscribing | StateFlags.Receiving);
+            await this.EnsureWorkingStatesAsync(true);
 
-            await this.SubscribeAsync();
+            if (!await this.TrySubscribeAsync())
+            {
+                await this.HandleInvalidState(this.State, false);
+            }
 
             try
             {
@@ -309,7 +273,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         protected override async Task OnCompleteAsync(string lockToken)
         {
-            await this.EnsureStateAsync(StateFlags.Receiving);
+            await this.EnsureWorkingStatesAsync(false);
+
             if (this.qos == QualityOfService.AtMostOnce)
             {
                 throw new InvalidOperationException("Complete is not allowed for QoS 0.");
@@ -346,7 +311,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         #region MQTT callbacks
         void OnConnected()
         {
-            this.connectCompletion.TryComplete();
+            if (TryStateTransition(StateFlags.Opening, StateFlags.Open))
+            {
+                this.connectCompletion.TryComplete();
+                Interlocked.Exchange(ref this.connectCompletion, new TaskCompletionSource());
+            }
         }
 
         void OnMessageReceived(Message message)
@@ -357,25 +326,17 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         async void OnError(Exception exception)
         {
-            var initialCompletionSources = new[] { this.connectCompletion, this.subscribeCompletionSource, this.reestablishConnectionCompletion };
+            this.transientException = exception;
+            var initialCompletionSources = new[] { this.connectCompletion, this.subscribeCompletionSource, this.resetConnectionCompletion };
             try
             {
-                if (this.TryStateTransition(StateFlags.Opening | StateFlags.Open, StateFlags.TransientError))
+                if (this.TryStateTransition(StateFlags.Opening | StateFlags.Open | StateFlags.Subscribing | StateFlags.Receiving, StateFlags.TransientError))
                 {
-                    if (await this.ReopenAsync())
-                    {
-                        this.reestablishConnectionCompletion.TryComplete();
-                    }
-                    else
-                    {
-                        this.Abort(initialCompletionSources, exception);
-                    }
-                }
-                if (this.TryStateTransition(StateFlags.Subscribing | StateFlags.Receiving, StateFlags.TransientError))
-                {
-                    await this.ReopenAsync();
-                    await this.SubscribeAsync();
-                    this.reestablishConnectionCompletion.TryComplete();
+                    this.connectCompletion.TrySetException(exception);
+                    Interlocked.Exchange(ref this.connectCompletion, new TaskCompletionSource());
+                    this.subscribeCompletionSource.TrySetException(exception);
+                    Interlocked.Exchange(ref this.subscribeCompletionSource, new TaskCompletionSource());
+                    await this.ResetAsync();
                 }
             }
             catch (Exception ex) when (!ex.IsFatal())
@@ -386,42 +347,101 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         #endregion
 
+        async Task<bool> TryOpenAsync()
+        {
+            if (this.TryStateTransition(StateFlags.NotInitialized, StateFlags.Opening))
+            {
+                try
+                {
+                    this.channel = await this.channelFactory(this.serverAddress, ProtocolGatewayPort);
+                }
+                catch (Exception ex)
+                {
+                    if (ex.IsFatal())
+                    {
+                        throw;
+                    }
+
+                    this.OnError(ex);
+                }
+                this.ScheduleCleanup(async () =>
+                {
+                    this.disconnectAwaitersCancellationSource.Cancel();
+                    if (this.channel == null)
+                    {
+                        return;
+                    }
+                    if (this.channel.Active)
+                    {
+                        await this.channel.WriteAsync(DisconnectPacket.Instance);
+                    }
+                    if (this.channel.Open)
+                    {
+                        await this.channel.CloseAsync();
+                    }
+                });
+
+                await this.connectCompletion.Task;
+                return true;
+            }
+            else
+            {
+                Task<int> currentConnectCompletion = this.connectCompletion.Task;
+                if (this.TryStateTransition(StateFlags.Opening, StateFlags.Opening))
+                {
+                    await currentConnectCompletion;
+                    return true;
+                }
+                return this.State == StateFlags.Open;
+            }
+        }
+
         async Task StopAsync()
         {
             try
             {
-                await this.closeRetryPolicy.ExecuteAsync(() => this.cleanupFunc());
+                await this.closeRetryPolicy.ExecuteAsync(this.CleanupAsync);
                 this.connectCompletion.TrySetCanceled();
                 this.subscribeCompletionSource.TrySetCanceled();
-                this.reestablishConnectionCompletion.TrySetCanceled();
+                this.resetConnectionCompletion.TrySetCanceled();
                 this.TryStateTransition(StateFlags.Closing, StateFlags.Closed);
             }
             catch (Exception ex)
             {
-                this.Abort(new[] { this.connectCompletion, this.subscribeCompletionSource, this.reestablishConnectionCompletion }, ex);
+                this.Abort(new[] { this.connectCompletion, this.subscribeCompletionSource, this.resetConnectionCompletion }, ex);
                 this.State = StateFlags.Fatal;
                 throw;
             }
         }
 
-        async Task SubscribeAsync()
+        async Task<bool> TrySubscribeAsync()
         {
             if (this.TryStateTransition(StateFlags.Open, StateFlags.Subscribing))
             {
                 try
                 {
                     await this.channel.WriteAsync(new SubscribePacket());
-                    this.subscribeCompletionSource.TryComplete();
-                    this.TryStateTransition(StateFlags.Subscribing, StateFlags.Receiving);
+                    if (this.TryStateTransition(StateFlags.Subscribing, StateFlags.Receiving))
+                    {
+                        this.subscribeCompletionSource.TryComplete();
+                        Interlocked.Exchange(ref this.subscribeCompletionSource, new TaskCompletionSource());
+                    }
                 }
                 catch (Exception ex)
                 {
-                    this.subscribeCompletionSource.TrySetException(ex);
+                    this.OnError(ex);
                 }
+                return true;
             }
             else
             {
-                await this.subscribeCompletionSource.Task;
+                Task<int> currentSubscribeCompletion = this.subscribeCompletionSource.Task;
+                if (TryStateTransition(StateFlags.Subscribing, StateFlags.Subscribing))
+                {
+                    await currentSubscribeCompletion;
+                    return true;
+                }
+                return this.State == StateFlags.Receiving;
             }
         }
 
@@ -433,33 +453,31 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
             this.connectCompletion?.TrySetException(exception);
             this.subscribeCompletionSource?.TrySetException(exception);
-            this.reestablishConnectionCompletion?.TrySetException(exception);
+            this.resetConnectionCompletion?.TrySetException(exception);
             this.fatalException = exception;
             this.State = StateFlags.Fatal;
         }
 
-        async Task<bool> ReopenAsync()
+        async Task ResetAsync()
         {
-            int timeoutInMs;
-            if (this.ShouldRetry(out timeoutInMs))
+            await this.closeRetryPolicy.ExecuteAsync(this.CleanupAsync);
+            this.cleanupFunc = null;
+            Interlocked.Exchange(ref this.messageQueue, new ConcurrentQueue<Message>());
+            this.receivingSemaphore.Dispose();
+            Interlocked.Exchange(ref this.receivingSemaphore, new SemaphoreSlim(0));
+            if (TryStateTransition(StateFlags.TransientError, StateFlags.NotInitialized))
             {
-                await Task.Delay(timeoutInMs);
-
-                await this.closeRetryPolicy.ExecuteAsync(() => this.cleanupFunc());
-
-                this.State = StateFlags.NotInitialized;
-                await this.OnOpenAsync(true);
-
-                return true;
+                this.resetConnectionCompletion.TryComplete();
+                Interlocked.Exchange(ref this.resetConnectionCompletion, new TaskCompletionSource());
             }
-            return false;
         }
 
         StateFlags AtomicStatusChange(StateFlags newState)
         {
             StateFlags oldState = this.State;
-            SpinWait.SpinUntil(() => (oldState = (StateFlags)Interlocked.CompareExchange(ref this.transportStatus, (long)newState, (long)oldState)) != newState);
-            return oldState;
+            var stateArray = new[] { oldState };
+            SpinWait.SpinUntil(() => (stateArray[0] = (StateFlags)Interlocked.CompareExchange(ref this.transportStatus, (long)newState, (long)stateArray[0])) != newState);
+            return stateArray[0];
         }
 
         Func<IPAddress, int, Task<IChannel>> CreateChannelFactory(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings)
@@ -512,7 +530,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             try
             {
-                await this.closeRetryPolicy.ExecuteAsync(() => this.cleanupFunc());
+                await this.closeRetryPolicy.ExecuteAsync(this.CleanupAsync);
             }
             catch (Exception ex) when (!ex.IsFatal())
             {
@@ -520,9 +538,18 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
+        Task CleanupAsync()
+        {
+            if (this.cleanupFunc != null)
+            {
+                return this.cleanupFunc();
+            }
+            return TaskConstants.Completed;
+        }
+
         bool TryStateTransition(StateFlags fromState, StateFlags toState)
         {
-            foreach (StateFlags state in new[] { StateFlags.NotInitialized, StateFlags.Opening, StateFlags.Open, StateFlags.Subscribing, StateFlags.Receiving, StateFlags.TransientError, StateFlags.Disposing, StateFlags.Closing, StateFlags.Closed, StateFlags.Disposed, StateFlags.Fatal })
+            foreach (StateFlags state in new[] { StateFlags.NotInitialized, StateFlags.Opening, StateFlags.Open, StateFlags.Subscribing, StateFlags.Receiving, StateFlags.TransientError, StateFlags.Closing, StateFlags.Closed, StateFlags.Disposed, StateFlags.Fatal })
             {
                 if ((state & fromState) > 0)
                 {
@@ -552,15 +579,25 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         }
 
-        async Task EnsureStateAsync(StateFlags states)
+        async Task EnsureWorkingStatesAsync(bool reopen)
         {
             StateFlags state = this.State;
 
-            if ((state & states) > 0)
+            if ((state & (StateFlags.NotInitialized | StateFlags.Opening)) > 0)
+            {
+                await OnOpenAsync(true);
+            }
+
+            if ((state & (StateFlags.Open | StateFlags.Subscribing | StateFlags.Receiving)) > 0)
             {
                 return;
             }
 
+             await this.HandleInvalidState(state, reopen);
+        }
+
+        async Task HandleInvalidState(StateFlags state, bool reopen)
+        {
             if (state == StateFlags.Disposed)
             {
                 throw new ObjectDisposedException(this.GetType().Name);
@@ -568,15 +605,29 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             if (state == StateFlags.TransientError)
             {
-                await this.reestablishConnectionCompletion.Task;
+                if (!reopen)
+                {
+                    throw new IotHubClientException(this.transientException);
+                }
+
+                Task<int> currentResetCompletion = this.resetConnectionCompletion.Task;
+                if (TryStateTransition(StateFlags.TransientError, StateFlags.TransientError))
+                {
+                    await currentResetCompletion;
+                }
+
+                if (!await this.TryOpenAsync())
+                {
+                    await HandleInvalidState(this.State, false);
+                }
             }
 
             if (state == StateFlags.Fatal)
             {
-                throw new IotHubClientException("The client is in a bad state.", this.fatalException);
+                throw new IotHubClientException(this.fatalException);
             }
 
-            throw new IotHubCommunicationException("Connection is closed.");
+            throw new IotHubCommunicationException("Connection is closed. Please re-try the operation.");
         }
     }
 }

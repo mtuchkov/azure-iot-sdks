@@ -5,6 +5,7 @@ namespace Microsoft.Azure.Devices.Client
 {
     using System;
     using System.Collections.Generic;
+    using System.Collections.ObjectModel;
     using System.Text.RegularExpressions;
 #if !WINDOWS_UWP
     using System.Linq;
@@ -683,7 +684,7 @@ namespace Microsoft.Azure.Devices.Client
         {
             Exception lastException = null;
             // Concrete Device Client creation was deferred. Use prioritized list of transports.
-            foreach (var transportSetting in this.transportSettings)
+            foreach (ITransportSettings transportSetting in this.transportSettings)
             {
                 TransportHandlerBase helper = null;
                 try
@@ -709,16 +710,19 @@ namespace Microsoft.Azure.Devices.Client
                 }
                 catch (Exception exception)
                 {
-                    await helper.CloseAsync();
+                    if (helper != null)
+                    {
+                        await helper.CloseAsync();
+                    }
                     if (!(exception is IotHubCommunicationException || exception is TimeoutException || exception is SocketException || exception is AggregateException))
                     {
                         throw;
                     }
 
-                    if (exception is AggregateException)
+                    var aggregateException = exception as AggregateException;
+                    if (aggregateException != null)
                     {
-                        var aggregateException = (AggregateException)exception;
-                        var innerExceptions = aggregateException.Flatten().InnerExceptions;
+                        ReadOnlyCollection<Exception> innerExceptions = aggregateException.Flatten().InnerExceptions;
                         if (!innerExceptions.Any(x => x is IotHubCommunicationException || x is SocketException || x is TimeoutException))
                         {
                             throw;
@@ -738,7 +742,10 @@ namespace Microsoft.Azure.Devices.Client
                 return;
             }
 
-            throw lastException;
+            if (lastException != null)
+            {
+                throw new InvalidOperationException("Unhandled exception", lastException);
+            }
         }
 
         public void Dispose()

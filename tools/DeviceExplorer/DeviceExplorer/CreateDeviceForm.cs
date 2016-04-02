@@ -1,7 +1,11 @@
 ﻿using Microsoft.Azure.Devices;
 using Microsoft.Azure.Devices.Common;
 using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
+using Microsoft.ServiceBus;
 
 namespace DeviceExplorer
 {
@@ -43,16 +47,8 @@ namespace DeviceExplorer
         {
             try
             {
-                var device = new Device(deviceIDTextBox.Text);
-                await registryManager.AddDeviceAsync(device);
-                device = await registryManager.GetDeviceAsync(device.Id);
-                device.Authentication.SymmetricKey.PrimaryKey = primaryKeyTextBox.Text;
-                device.Authentication.SymmetricKey.SecondaryKey = secondaryKeyTextBox.Text;
-                device = await registryManager.UpdateDeviceAsync(device);
-
-                var deviceCreated = new DeviceCreatedForm(device.Id, device.Authentication.SymmetricKey.PrimaryKey, device.Authentication.SymmetricKey.SecondaryKey);
-                deviceCreated.ShowDialog();
-
+                await RegisterDevicesAsync();
+                
                 this.Close();
             }
             catch (Exception ex)
@@ -60,6 +56,52 @@ namespace DeviceExplorer
                 using (new CenterDialog(this))
                 {
                     MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private async Task RegisterDevicesAsync()
+        {
+            for (int j = 0; j < 10; j++)
+            {
+                try
+                {
+                    var devices = await registryManager.GetDevicesAsync(1100);
+                    var ids = new List<int>();
+                    for (int k = 0; k < 1000; k++)
+                    {
+                        ids.Add(k);
+                    }
+                    foreach (var d in devices)
+                    {
+                        if (d.Id.StartsWith("mydevice_"))
+                        {
+                            var id = int.Parse(d.Id.Substring("mydevice_".Length));
+                            ids.Remove(id);
+                            if (d.Authentication.SymmetricKey.PrimaryKey != "sHxvBAjxU0ydNh9dZwjf3W5l6MBItKQvDCTAQVYuJh4=")
+                            {
+                                d.Authentication.SymmetricKey.PrimaryKey = "sHxvBAjxU0ydNh9dZwjf3W5l6MBItKQvDCTAQVYuJh4=";
+                                d.Authentication.SymmetricKey.SecondaryKey = "sHxvBAjxU0ydNh9dZwjf3W5l6MBItKQvDCTAQVYuJh4=";
+                                await registryManager.UpdateDeviceAsync(d);
+                            }
+                        }
+                    }
+                    foreach (var id in ids)
+                    {
+                        var device = new Device("mydevice_" + id);
+                        device = await registryManager.GetDeviceAsync(device.Id) ??
+                                 await this.registryManager.AddDeviceAsync(device);
+                        if (device.Authentication.SymmetricKey.PrimaryKey != "sHxvBAjxU0ydNh9dZwjf3W5l6MBItKQvDCTAQVYuJh4=")
+                        {
+                            device.Authentication.SymmetricKey.PrimaryKey = "sHxvBAjxU0ydNh9dZwjf3W5l6MBItKQvDCTAQVYuJh4=";
+                            device.Authentication.SymmetricKey.SecondaryKey = "sHxvBAjxU0ydNh9dZwjf3W5l6MBItKQvDCTAQVYuJh4=";
+                            await registryManager.UpdateDeviceAsync(device);
+                        }
+                    }
+                }
+                catch
+                {
+                    continue;
                 }
             }
         }

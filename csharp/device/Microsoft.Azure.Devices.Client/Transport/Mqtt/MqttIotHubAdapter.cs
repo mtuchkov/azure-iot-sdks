@@ -103,34 +103,42 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         public override Task WriteAsync(IChannelHandlerContext context, object data)
         {
-            if (this.IsInState(StateFlags.Closed))
+            try
             {
-                return TaskConstants.Completed;
-            }
+                if (this.IsInState(StateFlags.Closed))
+                {
+                    return TaskConstants.Completed;
+                }
 
-            var message = data as Message;
-            if (message != null)
+                var message = data as Message;
+                if (message != null)
+                {
+                    return this.SendMessageAsync(context, message);
+                }
+
+                string packetIdString = data as string;
+                if (packetIdString != null)
+                {
+                    return this.AcknowledgeAsync(context, packetIdString);
+                }
+
+                if (data is DisconnectPacket)
+                {
+                    return Util.WriteMessageAsync(context, data, ShutdownOnWriteErrorHandler);
+                }
+
+                if (data is SubscribePacket)
+                {
+                    return this.SubscribeAsync(context);
+                }
+
+                throw new InvalidOperationException($"Unexpected data type: '{data.GetType().Name}'");
+            }
+            catch (Exception ex) when (!ex.IsFatal())
             {
-                return this.SendMessageAsync(context, message);
+                ShutdownOnError(context, ex);
+                throw;
             }
-
-            string packetIdString = data as string;
-            if (packetIdString != null)
-            {
-                return this.AcknowledgeAsync(context, packetIdString);
-            }
-
-            if (data is DisconnectPacket)
-            {
-                return Util.WriteMessageAsync(context, data, ShutdownOnWriteErrorHandler);
-            }
-
-            if (data is SubscribePacket)
-            {
-                return this.SubscribeAsync(context);
-            }
-
-            throw new InvalidOperationException($"Unexpected data type: '{data.GetType().Name}'");
         }
 
         public override void ChannelRead(IChannelHandlerContext context, object message)
