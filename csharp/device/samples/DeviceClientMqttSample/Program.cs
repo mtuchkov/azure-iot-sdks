@@ -1,12 +1,13 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-using System;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Microsoft.Azure.Devices.Client.Samples
+namespace DeviceClientMqttSample
 {
+    using System;
+    using System.Text;
+    using System.Threading.Tasks;
+    using Microsoft.Azure.Devices.Client;
+
     class Program
     {
 
@@ -19,6 +20,10 @@ namespace Microsoft.Azure.Devices.Client.Samples
 
         static void Main(string[] args)
         {
+            var test = new DeviceClientStressTest();
+            test.TestInit();
+            test.CreateTonsOfClientsSuccessfully().Wait();
+
             try
             {
                 DeviceClient deviceClient = DeviceClient.CreateFromConnectionString(DeviceConnectionString, TransportType.Mqtt);

@@ -14,8 +14,8 @@ namespace Microsoft.Azure.Devices.Client.Transport
     /// </summary>
     abstract class TransportHandlerBase : IDisposable
     {
-        bool openCalled;
-        bool closeCalled;
+        internal bool openCalled;
+        internal bool closeCalled;
         volatile TaskCompletionSource<object> openTaskCompletionSource;
 
         protected TransportHandlerBase()
@@ -239,7 +239,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
                 this.OnOpenAsync(explicitOpen).ContinueWith(
                     t =>
                     {
-                        var localOpenTaskCompletionSource = this.openTaskCompletionSource;
+                        TaskCompletionSource<object> localOpenTaskCompletionSource = this.openTaskCompletionSource;
                         lock (this.ThisLock)
                         {
                             if (!t.IsFaulted && !t.IsCanceled)

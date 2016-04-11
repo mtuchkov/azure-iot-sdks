@@ -644,14 +644,16 @@ namespace Microsoft.Azure.Devices.Client
             }
 
             bool executeOpen = false;
-            var localTcs = this.openTaskCompletionSource;
-       
-            if (localTcs == null)
+            TaskCompletionSource<object> localTcs = this.openTaskCompletionSource;
+
+            TaskStatus? taskStatus = localTcs?.Task.Status;
+            if (taskStatus == null || taskStatus == TaskStatus.Canceled || taskStatus == TaskStatus.Faulted)
             {
                 lock (this.thisLock)
                 {
                     localTcs = this.openTaskCompletionSource;
-                    if (localTcs == null)
+                    taskStatus = localTcs?.Task.Status;
+                    if (taskStatus == null || taskStatus == TaskStatus.Canceled || taskStatus == TaskStatus.Faulted)
                     {
                         localTcs = this.openTaskCompletionSource = new TaskCompletionSource<object>();
                         executeOpen = true;

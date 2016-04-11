@@ -16,7 +16,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using Microsoft.Azure.Devices.Client.Common;
     using Microsoft.Azure.Devices.Client.Exceptions;
     using Microsoft.Azure.Devices.Client.Extensions;
-
+    
     sealed class MqttIotHubAdapter : ChannelHandlerAdapter
     {
         [Flags]
@@ -37,14 +37,16 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         static readonly Action<object> CheckConnAckTimeoutCallback = ShutdownIfNotReady;
         static readonly Func<IChannelHandlerContext, Exception, bool> ShutdownOnWriteErrorHandler = (ctx, ex) => { ShutdownOnError(ctx, ex); return false; };
 
-        readonly Action onConnected;
+        readonly Action<long> onConnected;
+        readonly Action<long, Message> onMessageReceived;
+        readonly Action<long, Exception> onError;
+
+        readonly long channelGeneration;
         readonly string deviceId;
-        readonly Action<Exception> onError;
         readonly SimpleWorkQueue<PublishPacket> deviceBoundOneWayProcessor;
         readonly OrderedTwoPhaseWorkQueue<int, PublishPacket> deviceBoundTwoWayProcessor;
         readonly string iotHubHostName;
         readonly MqttTransportSettings mqttTransportSettings;
-        readonly Action<Message> onMessageReceived;
         readonly TimeSpan pingRequestInterval;
         readonly string password;
         readonly SimpleWorkQueue<PublishWorkItem> serviceBoundOneWayProcessor;
@@ -58,14 +60,15 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         int InboundBacklogSize => this.deviceBoundOneWayProcessor.BacklogSize + this.deviceBoundTwoWayProcessor.BacklogSize;
 
         public MqttIotHubAdapter(
+            long channelGeneration,
             string deviceId, 
             string iotHubHostName, 
             string password, 
             MqttTransportSettings mqttTransportSettings, 
             IWillMessage willMessage,
-            Action onConnected,
-            Action<Message> onMessageReceived,
-            Action<Exception> onError)
+            Action<long> onConnected,
+            Action<long, Message> onMessageReceived,
+            Action<long, Exception> onError)
         {
             Contract.Requires(deviceId != null);
             Contract.Requires(iotHubHostName != null);
@@ -73,6 +76,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             Contract.Requires(mqttTransportSettings != null);
             Contract.Requires(!mqttTransportSettings.HasWill || willMessage != null);
 
+            this.channelGeneration = channelGeneration;
             this.deviceId = deviceId;
             this.iotHubHostName = iotHubHostName;
             this.password = password;
@@ -158,7 +162,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             else
             {
                 // we did not start processing CONNACK yet which means we haven't received it yet but the packet of different type has arrived.
-                ShutdownOnError(context);
+                ShutdownOnError(context, new InvalidOperationException($"Invalid state: {this.stateFlags}, packet: {packet.PacketType}"));
             }
         }
 
@@ -197,37 +201,43 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         #region Connect
         async void Connect(IChannelHandlerContext context)
         {
-
-            var connectPacket = new ConnectPacket
+            try
             {
-                ClientId = this.deviceId,
-                HasUsername = true,
-                Username = this.iotHubHostName + "/" + this.deviceId,
-                HasPassword = true,
-                Password = this.password,
-                KeepAliveInSeconds = this.mqttTransportSettings.KeepAliveInSeconds,
-                CleanSession = this.mqttTransportSettings.CleanSession,
-                HasWill = this.mqttTransportSettings.HasWill
-            };
-            if (connectPacket.HasWill)
-            {
-                Message message = this.willMessage.Message;
-                QualityOfService publishToServerQoS = this.mqttTransportSettings.PublishToServerQoS;
-                string topicName = string.Format(TelemetryTopicFormat, this.deviceId);
-                PublishPacket will = await Util.ComposePublishPacketAsync(context, message, publishToServerQoS, topicName);
+                var connectPacket = new ConnectPacket
+                {
+                    ClientId = this.deviceId,
+                    HasUsername = true,
+                    Username = this.iotHubHostName + "/" + this.deviceId,
+                    HasPassword = true,
+                    Password = this.password,
+                    KeepAliveInSeconds = this.mqttTransportSettings.KeepAliveInSeconds,
+                    CleanSession = this.mqttTransportSettings.CleanSession,
+                    HasWill = this.mqttTransportSettings.HasWill
+                };
+                if (connectPacket.HasWill)
+                {
+                    Message message = this.willMessage.Message;
+                    QualityOfService publishToServerQoS = this.mqttTransportSettings.PublishToServerQoS;
+                    string topicName = string.Format(TelemetryTopicFormat, this.deviceId);
+                    PublishPacket will = await Util.ComposePublishPacketAsync(context, message, publishToServerQoS, topicName);
 
-                connectPacket.WillMessage = will.Payload;
-                connectPacket.WillQualityOfService = this.willMessage.QoS;
-                connectPacket.WillRetain = false;
-                connectPacket.WillTopicName = will.TopicName;
+                    connectPacket.WillMessage = will.Payload;
+                    connectPacket.WillQualityOfService = this.willMessage.QoS;
+                    connectPacket.WillRetain = false;
+                    connectPacket.WillTopicName = will.TopicName;
+                }
+                this.stateFlags = StateFlags.Connecting;
+
+                await Util.WriteMessageAsync(context, connectPacket, ShutdownOnWriteErrorHandler);
+                this.lastChannelActivityTime = DateTime.UtcNow;
+                this.ScheduleKeepConnectionAlive(context);
+
+                this.ScheduleCheckConnectTimeout(context);
             }
-            this.stateFlags = StateFlags.Connecting;
-
-            await Util.WriteMessageAsync(context, connectPacket, ShutdownOnWriteErrorHandler);
-            this.lastChannelActivityTime = DateTime.UtcNow;
-            this.ScheduleKeepConnectionAlive(context);
-
-            this.ScheduleCheckConnectTimeout(context);
+            catch (Exception ex) when (!ex.IsFatal())
+            {
+                ShutdownOnError(context, ex);
+            }
         }
 
         async void ScheduleKeepConnectionAlive(IChannelHandlerContext context)
@@ -236,9 +246,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 await context.Channel.EventLoop.ScheduleAsync(PingServerCallback, context, this.pingRequestInterval);
             }
-            catch (OperationCanceledException)
+            catch (Exception ex) when (!ex.IsFatal())
             {
-                
+                ShutdownOnError(context, ex);
             }
         }
 
@@ -248,9 +258,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 await context.Channel.EventLoop.ScheduleAsync(CheckConnAckTimeoutCallback, context, this.mqttTransportSettings.ConnectArrivalTimeout);
             }
-            catch (OperationCanceledException)
+            catch (Exception ex) when (!ex.IsFatal())
             {
-
+                ShutdownOnError(context, ex);
             }
         }
 
@@ -267,22 +277,29 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         static async void PingServer(object ctx)
         {
             var context = (IChannelHandlerContext)ctx;
-            var self = (MqttIotHubAdapter)context.Handler;
-
-            if (!self.IsInState(StateFlags.Connected))
+            try
             {
-                return;
+                var self = (MqttIotHubAdapter)context.Handler;
+
+                if (!self.IsInState(StateFlags.Connected))
+                {
+                    return;
+                }
+
+                TimeSpan idleTime = DateTime.UtcNow - self.lastChannelActivityTime;
+
+                if (idleTime > self.pingRequestInterval)
+                {
+                    // We've been idle for too long, send a ping!
+                    await Util.WriteMessageAsync(context, PingReqPacket.Instance, ShutdownOnWriteErrorHandler);
+                }
+
+                self.ScheduleKeepConnectionAlive(context);
             }
-
-            TimeSpan idleTime = DateTime.UtcNow - self.lastChannelActivityTime;
-
-            if (idleTime > self.pingRequestInterval)
+            catch (Exception ex) when (!ex.IsFatal())
             {
-                // We've been idle for too long, send a ping!
-                await Util.WriteMessageAsync(context, PingReqPacket.Instance, ShutdownOnWriteErrorHandler);
+                ShutdownOnError(context, ex);
             }
-
-            self.ScheduleKeepConnectionAlive(context);
         }
 
         void ProcessConnectAck(IChannelHandlerContext context, ConnAckPacket packet)
@@ -307,7 +324,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             this.ResumeReadingIfNecessary(context);
 
-            this.onConnected();
+            this.onConnected(this.channelGeneration);
         }
         #endregion
 
@@ -344,32 +361,39 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         #region Receiving
 
-        void ProcessMessage(IChannelHandlerContext context, Packet packet)
+        async void ProcessMessage(IChannelHandlerContext context, Packet packet)
         {
             if (this.IsInState(StateFlags.Closed))
             {
                 return;
             }
 
-            switch (packet.PacketType)
+            try
             {
-                case PacketType.CONNACK:
-                    this.ProcessConnectAck(context, (ConnAckPacket)packet);
-                    break;
-                case PacketType.SUBACK:
-                    this.ProcessSubAck();
-                    break;
-                case PacketType.PUBLISH:
-                    this.ProcessPublish(context, (PublishPacket)packet);
-                    break;
-                case PacketType.PUBACK:
-                    this.serviceBoundTwoWayProcessor.CompleteWorkAsync(context, ((PubAckPacket)packet).PacketId);
-                    break;
-                case PacketType.PINGRESP:
-                    break;
-                default:
-                    ShutdownOnError(context);
-                    break;
+                switch (packet.PacketType)
+                {
+                    case PacketType.CONNACK:
+                        this.ProcessConnectAck(context, (ConnAckPacket)packet);
+                        break;
+                    case PacketType.SUBACK:
+                        this.ProcessSubAck();
+                        break;
+                    case PacketType.PUBLISH:
+                        this.ProcessPublish(context, (PublishPacket)packet);
+                        break;
+                    case PacketType.PUBACK:
+                        await this.serviceBoundTwoWayProcessor.CompleteWorkAsync(context, ((PubAckPacket)packet).PacketId);
+                        break;
+                    case PacketType.PINGRESP:
+                        break;
+                    default:
+                        ShutdownOnError(context, new InvalidOperationException($"Unexpected packet type {packet.PacketType}"));
+                        break;
+                }
+            }
+            catch (Exception ex) when(!ex.IsFatal())
+            {
+                ShutdownOnError(context, ex);
             }
         }
 
@@ -396,7 +420,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 publish.Release();
             }
-            this.onMessageReceived(message);
+            this.onMessageReceived(this.channelGeneration, message);
             return TaskConstants.Completed;
         }
 
@@ -497,22 +521,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             var self = (MqttIotHubAdapter)context.Handler;
             if (!self.IsInState(StateFlags.Closed))
             {
-                ShutdownOnError(context);
-                self.subscribeCompletion?.TrySetException(exception);
-                self.onError(exception);
-            }
-        }
-
-        /// <summary>
-        ///     Logs error and initiates closure of both channel and hub connection.
-        /// </summary>
-        /// <param name="context"></param>
-        static void ShutdownOnError(IChannelHandlerContext context)
-        {
-            var self = (MqttIotHubAdapter)context.Handler;
-            if (!self.IsInState(StateFlags.Closed))
-            {
                 self.Shutdown(context);
+                self.subscribeCompletion?.TrySetException(exception);
+                self.onError(self.channelGeneration, exception);
             }
         }
 
@@ -530,9 +541,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 this.CloseIotHubConnection();
                 await context.CloseAsync();
             }
-            catch
+            catch (Exception ex) when (!ex.IsFatal())
             {
-                // ignored
+                //ignored
             }
         }
 
@@ -556,7 +567,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                     this.deviceBoundOneWayProcessor.Completion,
                     this.deviceBoundTwoWayProcessor.Completion);
             }
-            catch
+            catch (Exception completeEx) when (!completeEx.IsFatal())
             {
                 try
                 {
@@ -565,7 +576,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                     this.serviceBoundTwoWayProcessor.Abort();
                     this.deviceBoundTwoWayProcessor.Abort();
                 }
-                catch
+                catch (Exception abortEx) when (!abortEx.IsFatal())
                 {
                     // ignored on closing
                 }

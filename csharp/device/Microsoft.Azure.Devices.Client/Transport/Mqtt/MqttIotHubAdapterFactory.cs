@@ -15,15 +15,16 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         }
 
         public MqttIotHubAdapter Create(
-            Action onConnected, 
-            Action<Message> onMessageReceived,
-            Action<Exception> onError, 
+            long channelGeneration,
+            Action<long> onConnected, 
+            Action<long, Message> onMessageReceived,
+            Action<long, Exception> onError, 
             IotHubConnectionString iotHubConnectionString, 
             MqttTransportSettings mqttTransportSettings)
         {
             IWillMessage willMessage = mqttTransportSettings.HasWill ? this.settings.WillMessage : null;
             
-            return new MqttIotHubAdapter(
+            return new MqttIotHubAdapter(channelGeneration,
                 iotHubConnectionString.DeviceId,
                 iotHubConnectionString.HostName,
                 iotHubConnectionString.GetPassword(),
