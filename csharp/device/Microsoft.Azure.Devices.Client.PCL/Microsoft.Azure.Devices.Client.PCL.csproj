@@ -210,6 +210,9 @@
     <Compile Include="..\Microsoft.Azure.Devices.Client\Common\SynchronizedPool.cs">
       <Link>SynchronizedPool.cs</Link>
     </Compile>
+    <Compile Include="..\Microsoft.Azure.Devices.Client\Common\TaskConstants.cs">
+      <Link>TaskConstants.cs</Link>
+    </Compile>
     <Compile Include="..\Microsoft.Azure.Devices.Client\Common\TaskHelpers.cs">
       <Link>TaskHelpers.cs</Link>
     </Compile>
@@ -252,6 +255,9 @@
     <Compile Include="..\Microsoft.Azure.Devices.Client\DeviceClient.cs">
       <Link>DeviceClient.cs</Link>
     </Compile>
+    <Compile Include="..\Microsoft.Azure.Devices.Client\DeviceClientDelegatingHandler.cs">
+      <Link>DeviceClientDelegatingHandler.cs</Link>
+    </Compile>
     <Compile Include="..\Microsoft.Azure.Devices.Client\DotNetHelpers.cs">
       <Link>DotNetHelpers.cs</Link>
     </Compile>
@@ -263,6 +269,9 @@
     </Compile>
     <Compile Include="..\Microsoft.Azure.Devices.Client\IAuthorizationHeaderProvider.cs">
       <Link>IAuthorizationHeaderProvider.cs</Link>
+    </Compile>
+    <Compile Include="..\Microsoft.Azure.Devices.Client\IDelegatingHandler.cs">
+      <Link>IDelegatingHandler.cs</Link>
     </Compile>
     <Compile Include="..\Microsoft.Azure.Devices.Client\IotHubConnectionCache.cs">
       <Link>IotHubConnectionCache.cs</Link>
@@ -291,6 +300,12 @@
     <Compile Include="..\Microsoft.Azure.Devices.Client\PutOperationType.cs">
       <Link>PutOperationType.cs</Link>
     </Compile>
+    <Compile Include="..\Microsoft.Azure.Devices.Client\Transport\ErrorHandler.cs">
+      <Link>ErrorHandler.cs</Link>
+    </Compile>
+    <Compile Include="..\Microsoft.Azure.Devices.Client\Transport\GatekeeperHandler.cs">
+      <Link>GatekeeperHandler.cs</Link>
+    </Compile>
     <Compile Include="..\Microsoft.Azure.Devices.Client\Transport\HttpClientHelper.cs">
       <Link>HttpClientHelper.cs</Link>
     </Compile>
@@ -300,11 +315,12 @@
     <Compile Include="..\Microsoft.Azure.Devices.Client\Transport\IHttpClientHelper.cs">
       <Link>IHttpClientHelper.cs</Link>
     </Compile>
-    <Compile Include="..\Microsoft.Azure.Devices.Client\Transport\TransportHandlerBase.cs">
-      <Link>TransportHandlerBase.cs</Link>
+    <Compile Include="..\Microsoft.Azure.Devices.Client\Transport\TransportHandler.cs">
+      <Link>TransportHandler.cs</Link>
     </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Resources.cs" />
+    <Compile Include="TaskCompletionSource.cs" />
     <Compile Include="TraceEventType.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\Portable\$(TargetFrameworkVersion)\Microsoft.Portable.CSharp.targets" />

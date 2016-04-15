@@ -211,9 +211,19 @@
     <Compile Include="$(DeviceClientDir)\Transport\IHttpClientHelper.cs">
       <Link>IHttpClientHelper.cs</Link>
     </Compile>
-    <Compile Include="$(DeviceClientDir)\Transport\TransportHandlerBase.cs">
-      <Link>TransportHandlerBase.cs</Link>
+    <Compile Include="..\Microsoft.Azure.Devices.Client.PCL\TaskCompletionSource.cs">
+      <Link>TaskCompletionSource.cs</Link>
     </Compile>
+    <Compile Include="..\Microsoft.Azure.Devices.Client\IDelegatingHandler.cs">
+      <Link>IDelegatingHandler.cs</Link>
+    </Compile>
+    <Compile Include="..\Microsoft.Azure.Devices.Client\Transport\ErrorHandler.cs">
+      <Link>ErrorHandler.cs</Link>
+    </Compile>
+    <Compile Include="..\Microsoft.Azure.Devices.Client\Transport\GatekeeperHandler.cs">
+      <Link>GatekeeperHandler.cs</Link>
+    </Compile>
+    <Compile Include="DeviceClientDelegatingHandler.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

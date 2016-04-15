@@ -143,13 +143,18 @@
     <Compile Include="AmqpConnectionPoolSettings.cs" />
     <Compile Include="Common\Exceptions\IotHubClientException.cs" />
     <Compile Include="AmqpTransportSettings.cs" />
+    <Compile Include="Common\Exceptions\IotHubClientTransientException.cs" />
     <Compile Include="Common\TaskConstants.cs" />
     <Compile Include="Common\TaskUtils.cs" />
+    <Compile Include="DeviceClientDelegatingHandler.cs" />
+    <Compile Include="IDelegatingHandler.cs" />
     <Compile Include="IotHubDeviceScopeConnectionPool.cs" />
     <Compile Include="IotHubScopeConnectionPool.cs" />
     <Compile Include="IotHubSingleTokenConnection.cs" />
     <Compile Include="IotHubMuxConnection.cs" />
     <Compile Include="IotHubTokenRefresher.cs" />
+    <Compile Include="Transport\RoutingHandler.cs" />
+    <Compile Include="Transport\TransportHandler.cs" />
     <Compile Include="Transport\AmqpClientHelper.cs" />
     <Compile Include="Common\UrlEncodedDictionarySerializer.cs" />
     <Compile Include="Common\ActionItem.cs" />
@@ -216,6 +221,7 @@
     <Compile Include="Common\FxTrace.cs" />
     <Compile Include="Common\HashCode.cs" />
     <Compile Include="Transport\Mqtt\ConcurrentObjectPool.cs" />
+    <Compile Include="Transport\ErrorHandler.cs" />
     <Compile Include="Transport\Mqtt\ICancellable.cs" />
     <Compile Include="Transport\Mqtt\ISessionContextProvider.cs" />
     <Compile Include="Http1TransportSettings.cs" />
@@ -265,7 +271,7 @@
     <Compile Include="Transport\Mqtt\MqttTransportSettings.cs" />
     <Compile Include="Transport\Mqtt\Util.cs" />
     <Compile Include="Transport\Mqtt\WillMessage.cs" />
-    <Compile Include="Transport\TransportHandlerBase.cs" />
+    <Compile Include="Transport\GatekeeperHandler.cs" />
     <Compile Include="Common\Security\SecurityConstants.cs" />
     <Compile Include="Common\Security\SecurityHelper.cs" />
     <Compile Include="Common\Security\StringValidationHelper.cs" />

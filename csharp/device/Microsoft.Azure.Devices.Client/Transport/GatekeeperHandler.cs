@@ -3,6 +3,7 @@
 
 namespace Microsoft.Azure.Devices.Client.Transport
 {
+
     // C# using aliases cannot name an unbound generic type declaration without supplying type arguments
     // Therefore, define a separate alias for each type argument
     using System;
@@ -12,21 +13,19 @@ namespace Microsoft.Azure.Devices.Client.Transport
     /// <summary>
     /// Contains the implementation of methods that a device can use to send messages to and receive from the service.
     /// </summary>
-    abstract class TransportHandlerBase : IDisposable
+    sealed class GatekeeperHandler : DeviceClientDelegatingHandler
     {
-        internal bool openCalled;
-        internal bool closeCalled;
+        internal bool OpenCalled;
+        internal bool CloseCalled;
         volatile TaskCompletionSource<object> openTaskCompletionSource;
 
-        protected TransportHandlerBase()
+        public GatekeeperHandler()
         {
             this.ThisLock = new object();
             this.openTaskCompletionSource = new TaskCompletionSource<object>(this);
         }
-
-        protected abstract TimeSpan DefaultReceiveTimeout { get; set; }
-
-        protected object ThisLock { get; private set; }
+        
+        protected object ThisLock { get; }
 
         /// <summary>
         /// Explicitly open the DeviceClient instance.
@@ -40,163 +39,84 @@ namespace Microsoft.Azure.Devices.Client.Transport
         /// Close the DeviceClient instance
         /// </summary>
         /// <returns></returns>
-        public Task CloseAsync()
+        public override Task CloseAsync()
         {
             TaskCompletionSource<object> localOpenTaskCompletionSource;
             lock (this.ThisLock)
             {
-                if (this.closeCalled)
+                if (this.CloseCalled)
                 {
                     return TaskHelpers.CompletedTask;
                 }
 
                 localOpenTaskCompletionSource = this.openTaskCompletionSource;
-                this.closeCalled = true;
+                this.CloseCalled = true;
             }
 
             localOpenTaskCompletionSource?.TrySetCanceled();
 
-            return this.OnCloseAsync();
-        }
-
-        /// <summary>
-        /// Receive a message from the device queue using the default timeout.
-        /// </summary>
-        /// <returns>The receive message or null if there was no message until the default timeout</returns>
-        public Task<Message> ReceiveAsync()
-        {
-            return this.ReceiveAsync(this.DefaultReceiveTimeout);
+            return base.CloseAsync();
         }
 
         /// <summary>
         /// Receive a message from the device queue with the specified timeout
         /// </summary>
         /// <returns>The receive message or null if there was no message until the specified time has elapsed</returns>
-        public async Task<Message> ReceiveAsync(TimeSpan timeout)
+        public override async Task<Message> ReceiveAsync(TimeSpan timeout)
         {
             TimeoutHelper.ThrowIfNegativeArgument(timeout);
             await this.EnsureOpenedAsync(false);
-            return await this.OnReceiveAsync(timeout);
+            return await base.ReceiveAsync(timeout);
         }
 
         /// <summary>
         /// Deletes a received message from the device queue
         /// </summary>
         /// <returns>The lock identifier for the previously received message</returns>
-        public async Task CompleteAsync(string lockToken)
+        public override async Task CompleteAsync(string lockToken)
         {
-            if (string.IsNullOrEmpty(lockToken))
-            {
-                throw Fx.Exception.ArgumentNull("lockToken");
-            }
-
             await this.EnsureOpenedAsync(false);
-            await this.OnCompleteAsync(lockToken);
-        }
-
-        /// <summary>
-        /// Deletes a received message from the device queue
-        /// </summary>
-        /// <returns>The previously received message</returns>
-        public async Task CompleteAsync(Message message)
-        {
-            if (message == null)
-            {
-                throw Fx.Exception.ArgumentNull("message");
-            }
-
-            await this.EnsureOpenedAsync(false);
-            await this.OnCompleteAsync(message);
+            await base.CompleteAsync(lockToken);
         }
 
         /// <summary>
         /// Puts a received message back onto the device queue
         /// </summary>
         /// <returns>The previously received message</returns>
-        public async Task AbandonAsync(string lockToken)
+        public override async Task AbandonAsync(string lockToken)
         {
-            if (string.IsNullOrEmpty(lockToken))
-            {
-                throw Fx.Exception.ArgumentNull("lockToken");
-            }
-
             await this.EnsureOpenedAsync(false);
-            await this.OnAbandonAsync(lockToken);
-        }
-
-        /// <summary>
-        /// Puts a received message back onto the device queue
-        /// </summary>
-        /// <returns>The lock identifier for the previously received message</returns>
-        public async Task AbandonAsync(Message message)
-        {
-            if (message == null)
-            {
-                throw Fx.Exception.ArgumentNull("message");
-            }
-
-            await this.EnsureOpenedAsync(false);
-            await this.OnAbandonAsync(message);
+            await base.AbandonAsync(lockToken);
         }
 
         /// <summary>
         /// Deletes a received message from the device queue and indicates to the server that the message could not be processed.
         /// </summary>
         /// <returns>The previously received message</returns>
-        public async Task RejectAsync(string lockToken)
+        public override async Task RejectAsync(string lockToken)
         {
-            if (string.IsNullOrEmpty(lockToken))
-            {
-                throw Fx.Exception.ArgumentNull("lockToken");
-            }
-
             await this.EnsureOpenedAsync(false);
-            await this.OnRejectAsync(lockToken);
-        }
-
-        /// <summary>
-        /// Deletes a received message from the device queue and indicates to the server that the message could not be processed.
-        /// </summary>
-        /// <returns>The lock identifier for the previously received message</returns>
-        public async Task RejectAsync(Message message)
-        {
-            if (message == null)
-            {
-                throw Fx.Exception.ArgumentNull("message");
-            }
-
-            await this.EnsureOpenedAsync(false);
-            await this.OnRejectAsync(message);
+            await base.RejectAsync(lockToken);
         }
 
         /// <summary>
         /// Sends an event to device hub
         /// </summary>
         /// <returns>The message containing the event</returns>
-        public async Task SendEventAsync(Message message)
+        public override async Task SendEventAsync(Message message)
         {
-            if (message == null)
-            {
-                throw Fx.Exception.ArgumentNull("message");
-            }
-
             await this.EnsureOpenedAsync(false);
-            await this.OnSendEventAsync(message);
+            await base.SendEventAsync(message);
         }
 
         /// <summary>
         /// Sends a batch of events to device hub
         /// </summary>
         /// <returns>The task containing the event</returns>
-        public async Task SendEventBatchAsync(IEnumerable<Message> messages)
+        public override async Task SendEventAsync(IEnumerable<Message> messages)
         {
-            if (messages == null)
-            {
-                throw Fx.Exception.ArgumentNull("messages");
-            }
-
             await this.EnsureOpenedAsync(false);
-            await this.OnSendEventAsync(messages);
+            await base.SendEventAsync(messages);
         }
 
         protected Task EnsureOpenedAsync(bool explicitOpen)
@@ -207,7 +127,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
             {
                 lock (this.ThisLock)
                 {
-                    if (this.openCalled)
+                    if (this.OpenCalled)
                     {
                         if (this.openTaskCompletionSource == null)
                         {
@@ -222,7 +142,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
                     else
                     {
                         // It's this call's job to kick off the open.
-                        this.openCalled = true;
+                        this.OpenCalled = true;
                         openTask = this.openTaskCompletionSource.Task;
                         needOpen = true;
                     }
@@ -236,7 +156,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
             if (needOpen)
             {
-                this.OnOpenAsync(explicitOpen).ContinueWith(
+                base.OpenAsync(explicitOpen).ContinueWith(
                     t =>
                     {
                         TaskCompletionSource<object> localOpenTaskCompletionSource = this.openTaskCompletionSource;
@@ -250,7 +170,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
                             else
                             {
                                 // OpenAsync was cancelled or threw an exception, next time retry.
-                                this.openCalled = false;
+                                this.OpenCalled = false;
                                 this.openTaskCompletionSource = new TaskCompletionSource<object>(this);
                             }
                         }
@@ -261,50 +181,6 @@ namespace Microsoft.Azure.Devices.Client.Transport
             }
 
             return openTask;
-        }
-
-        protected abstract Task OnOpenAsync(bool explicitOpen);
-
-        protected abstract Task OnCloseAsync();
-
-        protected abstract Task<Message> OnReceiveAsync(TimeSpan timeout);
-
-        protected virtual Task OnCompleteAsync(Message message)
-        {
-            return this.OnCompleteAsync(message.LockToken);
-        }
-
-        protected abstract Task OnCompleteAsync(string lockToken);
-
-        protected virtual Task OnAbandonAsync(Message message)
-        {
-            return this.OnAbandonAsync(message.LockToken);
-        }
-
-        protected abstract Task OnAbandonAsync(string lockToken);
-
-        protected virtual Task OnRejectAsync(Message message)
-        {
-            return this.OnRejectAsync(message.LockToken);
-        }
-
-        protected abstract Task OnRejectAsync(string lockToken);
-
-        protected abstract Task OnSendEventAsync(Message message);
-
-        protected abstract Task OnSendEventAsync(IEnumerable<Message> messages);
-
-        protected abstract void Dispose(bool disposing);
-
-        public void Dispose()
-        {
-            this.Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        ~TransportHandlerBase()
-        {
-            this.Dispose(false);
         }
     }
 }

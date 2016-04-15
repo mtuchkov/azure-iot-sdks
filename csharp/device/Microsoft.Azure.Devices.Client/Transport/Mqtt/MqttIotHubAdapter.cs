@@ -37,11 +37,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         static readonly Action<object> CheckConnAckTimeoutCallback = ShutdownIfNotReady;
         static readonly Func<IChannelHandlerContext, Exception, bool> ShutdownOnWriteErrorHandler = (ctx, ex) => { ShutdownOnError(ctx, ex); return false; };
 
-        readonly Action<long> onConnected;
-        readonly Action<long, Message> onMessageReceived;
-        readonly Action<long, Exception> onError;
+        readonly Action onConnected;
+        readonly Action<Message> onMessageReceived;
+        readonly Action<Exception> onError;
 
-        readonly long channelGeneration;
         readonly string deviceId;
         readonly SimpleWorkQueue<PublishPacket> deviceBoundOneWayProcessor;
         readonly OrderedTwoPhaseWorkQueue<int, PublishPacket> deviceBoundTwoWayProcessor;
@@ -60,15 +59,14 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         int InboundBacklogSize => this.deviceBoundOneWayProcessor.BacklogSize + this.deviceBoundTwoWayProcessor.BacklogSize;
 
         public MqttIotHubAdapter(
-            long channelGeneration,
             string deviceId, 
             string iotHubHostName, 
             string password, 
             MqttTransportSettings mqttTransportSettings, 
             IWillMessage willMessage,
-            Action<long> onConnected,
-            Action<long, Message> onMessageReceived,
-            Action<long, Exception> onError)
+            Action onConnected,
+            Action<Message> onMessageReceived,
+            Action<Exception> onError)
         {
             Contract.Requires(deviceId != null);
             Contract.Requires(iotHubHostName != null);
@@ -76,7 +74,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             Contract.Requires(mqttTransportSettings != null);
             Contract.Requires(!mqttTransportSettings.HasWill || willMessage != null);
 
-            this.channelGeneration = channelGeneration;
             this.deviceId = deviceId;
             this.iotHubHostName = iotHubHostName;
             this.password = password;
@@ -302,7 +299,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        void ProcessConnectAck(IChannelHandlerContext context, ConnAckPacket packet)
+        async Task ProcessConnectAck(IChannelHandlerContext context, ConnAckPacket packet)
         {
             if (packet.ReturnCode != ConnectReturnCode.Accepted)
             {
@@ -324,7 +321,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             this.ResumeReadingIfNecessary(context);
 
-            this.onConnected(this.channelGeneration);
+            if (packet.SessionPresent)
+            {
+                await this.SubscribeAsync(context);
+            }
+
+            this.onConnected();
         }
         #endregion
 
@@ -373,7 +375,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 switch (packet.PacketType)
                 {
                     case PacketType.CONNACK:
-                        this.ProcessConnectAck(context, (ConnAckPacket)packet);
+                        await this.ProcessConnectAck(context, (ConnAckPacket)packet);
                         break;
                     case PacketType.SUBACK:
                         this.ProcessSubAck();
@@ -420,7 +422,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 publish.Release();
             }
-            this.onMessageReceived(this.channelGeneration, message);
+            this.onMessageReceived(message);
             return TaskConstants.Completed;
         }
 
@@ -523,7 +525,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 self.Shutdown(context);
                 self.subscribeCompletion?.TrySetException(exception);
-                self.onError(self.channelGeneration, exception);
+                self.onError(exception);
             }
         }
 

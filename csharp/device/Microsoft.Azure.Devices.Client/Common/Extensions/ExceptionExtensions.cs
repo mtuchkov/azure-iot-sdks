@@ -19,6 +19,16 @@ namespace Microsoft.Azure.Devices.Client.Extensions
             return Fx.IsFatal(exception);
         }
 
+        public static bool IsTransient(this Exception exception)
+        {
+            return false;
+        }
+
+        public static bool IsNonTransient(this Exception exception)
+        {
+            return false;
+        }
+
         public static IEnumerable<Exception> Unwind(this Exception exception)
         {
             while (exception != null)
@@ -68,7 +78,7 @@ namespace Microsoft.Azure.Devices.Client.Extensions
 
         public static Exception DisablePrepareForRethrow(this Exception exception)
         {
-            exception.Data[AsyncResult.DisablePrepareForRethrow] = string.Empty;
+            exception.Data[AsyncResult.DisablePrepareForRethrow] = String.Empty;
             return exception;
         }
 
@@ -77,7 +87,7 @@ namespace Microsoft.Azure.Devices.Client.Extensions
             // exception.Data is empty collection by default.
             if (exception.Data != null && exception.Data.Contains(ExceptionIdentifierName))
             {
-                return string.Format(CultureInfo.InvariantCulture,
+                return String.Format(CultureInfo.InvariantCulture,
                     "ExceptionId: {0}-{1}: {2}",
                     exception.Data[ExceptionIdentifierName],
                     exception.GetType(),
@@ -88,7 +98,7 @@ namespace Microsoft.Azure.Devices.Client.Extensions
                 string exceptionIdentifier = Guid.NewGuid().ToString();
                 exception.Data[ExceptionIdentifierName] = exceptionIdentifier;
 
-                return string.Format(CultureInfo.InvariantCulture,
+                return String.Format(CultureInfo.InvariantCulture,
                     "ExceptionId: {0}-{1}",
                     exceptionIdentifier,
                     exception.ToString());

@@ -73,10 +73,10 @@ namespace Microsoft.Azure.Devices.Client
 
             switch (this.AmqpTransportSettings.GetTransportType())
             {
-                case TransportType.Amqp_WebSocket_Only:
+                case TransportType.AmqpWebSocketOnly:
                     transport = await this.CreateClientWebSocketTransportAsync(timeoutHelper.RemainingTime());
                     break;
-                case TransportType.Amqp_Tcp_Only:
+                case TransportType.AmqpTcpOnly:
                     TlsTransportSettings tlsTransportSettings = this.CreateTlsTransportSettings();
                     var amqpTransportInitiator = new AmqpTransportInitiator(amqpSettings, tlsTransportSettings);
                     transport = await amqpTransportInitiator.ConnectTaskAsync(timeoutHelper.RemainingTime());
