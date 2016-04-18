@@ -22,7 +22,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         readonly Queue<TWork> backlogQueue;
         readonly TaskCompletionSource completionSource;
-        State state;
+        protected State state;
 
         public SimpleWorkQueue(Func<IChannelHandlerContext, TWork, Task> worker)
         {
@@ -85,7 +85,13 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        public void Abort()
+
+        public virtual void Abort()
+        {
+            Abort(null);
+        }
+
+        public virtual void Abort(Exception exception)
         {
             switch (this.state)
             {
@@ -99,7 +105,14 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                     {
                         TWork workItem = queue.Dequeue();
                         ReferenceCountUtil.Release(workItem);
-                        (workItem as ICancellable)?.Cancel();
+                        if (exception == null)
+                        {
+                            (workItem as ICancellable)?.Cancel();
+                        }
+                        else
+                        {
+                            (workItem as ICancellable)?.Abort(exception);
+                        }
                     }
                     break;
                 case State.Aborted:
@@ -145,7 +158,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        enum State
+        protected enum State
         {
             Idle,
             Processing,

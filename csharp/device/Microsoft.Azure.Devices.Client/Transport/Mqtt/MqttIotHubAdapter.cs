@@ -102,35 +102,39 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             base.ChannelActive(context);
         }
 
-        public override Task WriteAsync(IChannelHandlerContext context, object data)
+        public override async Task WriteAsync(IChannelHandlerContext context, object data)
         {
             try
             {
                 if (this.IsInState(StateFlags.Closed))
                 {
-                    return TaskConstants.Completed;
+                    return;
                 }
 
                 var message = data as Message;
                 if (message != null)
                 {
-                    return this.SendMessageAsync(context, message);
+                    await this.SendMessageAsync(context, message);
+                    return;
                 }
 
                 string packetIdString = data as string;
                 if (packetIdString != null)
                 {
-                    return this.AcknowledgeAsync(context, packetIdString);
+                    await this.AcknowledgeAsync(context, packetIdString);
+                    return;
                 }
 
                 if (data is DisconnectPacket)
                 {
-                    return Util.WriteMessageAsync(context, data, ShutdownOnWriteErrorHandler);
+                    await Util.WriteMessageAsync(context, data, ShutdownOnWriteErrorHandler);
+                    return;
                 }
 
                 if (data is SubscribePacket)
                 {
-                    return this.SubscribeAsync(context);
+                    await this.SubscribeAsync(context);
+                    return;
                 }
 
                 throw new InvalidOperationException($"Unexpected data type: '{data.GetType().Name}'");
@@ -304,7 +308,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             if (packet.ReturnCode != ConnectReturnCode.Accepted)
             {
                 string reason = "CONNECT failed: " + packet.ReturnCode;
-                var iotHubException = new IotHubException(reason);
+                var iotHubException = new UnauthorizedException(reason);
                 ShutdownOnError(context, iotHubException);
                 return;
             }
@@ -518,14 +522,26 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         #endregion
 
         #region Shutdown
-        static void ShutdownOnError(IChannelHandlerContext context, Exception exception)
+        static async void ShutdownOnError(IChannelHandlerContext context, Exception exception)
         {
             var self = (MqttIotHubAdapter)context.Handler;
             if (!self.IsInState(StateFlags.Closed))
             {
-                self.Shutdown(context);
+                self.stateFlags |= StateFlags.Closed;
                 self.subscribeCompletion?.TrySetException(exception);
+                self.deviceBoundOneWayProcessor.Abort(exception);
+                self.deviceBoundTwoWayProcessor.Abort(exception);
+                self.serviceBoundOneWayProcessor.Abort(exception);
+                self.serviceBoundTwoWayProcessor.Abort(exception);
                 self.onError(exception);
+                try
+                {
+                    await context.CloseAsync();
+                }
+                catch (Exception ex) when (!ex.IsFatal())
+                {
+                    //ignored
+                }
             }
         }
 

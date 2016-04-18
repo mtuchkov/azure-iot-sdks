@@ -5,6 +5,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
 {
     using System;
     using System.Collections.Generic;
+    using System.IO;
     using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
@@ -22,7 +23,8 @@ namespace Microsoft.Azure.Devices.Client.Transport
         readonly Func<DeviceClientDelegatingHandler> handlerFactory;
 
         volatile TaskCompletionSource openCompletion;
-        volatile Exception fatalException;
+        internal volatile Exception fatalException;
+        internal int resetCounter;
 
         public ErrorHandler(Func<DeviceClientDelegatingHandler> handlerFactory)
         {
@@ -35,8 +37,19 @@ namespace Microsoft.Azure.Devices.Client.Transport
             {
                 throw this.fatalException;
             }
-            await base.OpenAsync(explicitOpen);
-            this.openCompletion.TryComplete();
+            if (this.openCompletion == null)
+            {
+#pragma warning disable 420 //Reference to volitile variable will not be treated as volatile which is not quite true in this case.
+                if (Interlocked.CompareExchange(ref this.openCompletion, new TaskCompletionSource(), null) == null)
+#pragma warning restore 420
+                {
+                    this.InnerHandler = this.handlerFactory();
+                    await base.OpenAsync(explicitOpen);
+                    this.openCompletion.TryComplete();
+                }
+                await this.openCompletion.Task;
+            }
+            await this.openCompletion.Task;
         }
 
         public override Task<Message> ReceiveAsync()
@@ -76,7 +89,9 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
         async Task<T> ExecuteWithErrorHandlingAsync<T>(Func<Task<T>> asyncOperation)
         {
-            TaskCompletionSource completedPromise = await this.EnsureReadyStateAsync();
+            await this.EnsureOpenAsync();
+
+            TaskCompletionSource completedPromise = this.openCompletion;
 
             IDelegatingHandler handler = this.InnerHandler;
             try
@@ -87,7 +102,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
             {
                 if (this.IsTransient(ex))
                 {
-                    if (this.IsTransportWorking((IotHubException)ex))
+                    if (this.IsTransportWorking(ex))
                     {
                         throw;
                     }
@@ -106,11 +121,9 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
         async Task ExecuteWithErrorHandlingAsync(Func<Task> asyncOperation)
         {
-            if (this.fatalException != null)
-            {
-                throw this.fatalException;
-            }
-            TaskCompletionSource completedPromise = await this.EnsureReadyStateAsync();
+            await this.EnsureOpenAsync();
+
+            TaskCompletionSource completedPromise = this.openCompletion;
             IDelegatingHandler handler = this.InnerHandler;
 
             try
@@ -121,7 +134,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
             {
                 if (this.IsTransient(ex))
                 {
-                    if (this.IsTransportWorking((IotHubException)ex))
+                    if (this.IsTransportWorking(ex))
                     {
                         throw;
                     }
@@ -139,28 +152,27 @@ namespace Microsoft.Azure.Devices.Client.Transport
             }
         }
 
-        bool IsTransportWorking(IotHubException exception)
+        Task EnsureOpenAsync()
         {
-            return exception.Unwind<InvalidOperationException>().Any();
+            return this.OpenAsync(false);
+        }
+
+        bool IsTransportWorking(Exception exception)
+        {
+            bool? isTransportWorking = exception.Unwind<IotHubException>().FirstOrDefault()?.Unwind<InvalidOperationException>().Any();
+            return isTransportWorking.HasValue && isTransportWorking.Value;
         }
 
         bool IsTransient(Exception exception)
         {
-            IotHubException ex = exception.Unwind<IotHubException>().FirstOrDefault();
-            return ex != null && !(ex is UnauthorizedException);
-        }
-
-        async Task<TaskCompletionSource> EnsureReadyStateAsync()
-        {
-#pragma warning disable 420 //Reference to volitile variable will not be treated as volatile which is not quite true in this case.
-            if (this.openCompletion == null && Interlocked.CompareExchange(ref this.openCompletion, new TaskCompletionSource(), null) == null)
-#pragma warning restore 420
-            {
-                await this.OpenAsync(false);
-            }
-            TaskCompletionSource readyPromise = this.openCompletion;
-            await readyPromise.Task;
-            return readyPromise;
+            IEnumerable<IotHubException> iotHubExceptions = exception.Unwind<IotHubException>();
+            bool hasUnauthorized = iotHubExceptions.Any(x=>x.Unwind<UnauthorizedException>().Any());
+            
+            return !hasUnauthorized && (iotHubExceptions.Any() || exception.Unwind<IOException>().Any() || exception.Unwind<ObjectDisposedException>().Any()  || exception.Unwind<OperationCanceledException>().Any() 
+#if !PCL && !WINDOWS_UWP
+                || exception.Unwind<System.Net.Sockets.SocketException>().Any()
+#endif
+                );
         }
 
         void Reset(TaskCompletionSource completion, IDelegatingHandler handler)
@@ -168,10 +180,13 @@ namespace Microsoft.Azure.Devices.Client.Transport
             if (completion == this.openCompletion)
             {
 #pragma warning disable 420 //Reference to volitile variable will not be treated as volatile which is not quite true in this case.
-                if (Interlocked.CompareExchange(ref this.openCompletion, new TaskCompletionSource(), completion) == completion)
+                if (Interlocked.CompareExchange(ref this.openCompletion, null, completion) == completion)
 #pragma warning restore 420
                 {
-                    this.Cleanup(handler);
+                    if (handler == this.innerHandler)
+                    {
+                        this.Cleanup(handler);
+                    }
                 }
             }
         }
@@ -183,12 +198,6 @@ namespace Microsoft.Azure.Devices.Client.Transport
                 if (handler != null)
                 {
                     await handler.CloseAsync();
-                    if (handler == this.innerHandler)
-                    {
-#pragma warning disable 420 //Reference to volitile variable will not be treated as volatile which is not quite true in this case.
-                        Interlocked.CompareExchange(ref this.innerHandler, this.handlerFactory(), handler);
-#pragma warning restore 420
-                    }
                 }
             }
             catch (Exception ex) when (!ex.IsFatal())

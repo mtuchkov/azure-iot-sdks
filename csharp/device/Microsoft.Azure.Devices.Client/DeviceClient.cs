@@ -4,6 +4,7 @@
 namespace Microsoft.Azure.Devices.Client
 {
     using System;
+    using System.Collections.Concurrent;
     using System.Collections.Generic;
     using System.Text.RegularExpressions;
     using Microsoft.Azure.Devices.Client.Extensions;
@@ -21,6 +22,11 @@ namespace Microsoft.Azure.Devices.Client
     using AsyncTask = System.Threading.Tasks.Task;
     using AsyncTaskOfMessage = System.Threading.Tasks.Task<Message>;
 #endif
+
+    public class DeviceStore
+    {
+        public static readonly ConcurrentDictionary<string, ConcurrentQueue<DeviceClient>> Clients = new ConcurrentDictionary<string, ConcurrentQueue<DeviceClient>>();
+    }
 
     /// <summary>
     /// Transport types supported by DeviceClient - Amqp and HTTP 1.1
@@ -76,6 +82,8 @@ namespace Microsoft.Azure.Devices.Client
 #if !WINDOWS_UWP && !PCL
         DeviceClient(IotHubConnectionString iotHubConnectionString, ITransportSettings[] transportSettings)
         {
+            DeviceStore.Clients.AddOrUpdate(iotHubConnectionString.ToString(), s => new ConcurrentQueue<DeviceClient>(new[] { this }), (s, t) => { t.Enqueue(this); return t; });
+
             this.TransportHandlerFactory = this.CreateTransportHandler;
             this.innerHandler = new GatekeeperHandler
             {

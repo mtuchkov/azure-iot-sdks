@@ -64,7 +64,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         Exception fatalException;
 
         int state = (int)TransportState.NotInitialized;
-        TransportState State => (TransportState)Volatile.Read(ref this.state);
+        internal TransportState State => (TransportState)Volatile.Read(ref this.state);
 
         internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString)
             : this(iotHubConnectionString, new MqttTransportSettings(TransportType.Mqtt))
@@ -141,11 +141,20 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             await this.OpenAsync();
         }
 
+        internal int resetCounter;
+
         public override async Task SendEventAsync(Message message)
         {
-            this.EnsureValidState();
+            try
+            {
+                this.EnsureValidState();
 
-            await this.channel.WriteAndFlushAsync(message);
+                await this.channel.WriteAndFlushAsync(message);
+            }
+            catch (Exception ex)
+            {
+                throw;
+            }
         }
 
         public override async Task SendEventAsync(IEnumerable<Message> messages)
