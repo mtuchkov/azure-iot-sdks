@@ -13,9 +13,38 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     {
         class Entry
         {
-            public HashSet<TKey> Keys { get; set; }
+            readonly IEqualityComparer<TKey> comparer;
+
+            public TKey Key { get; }
 
             public int RefCount { get; set; }
+
+            public Entry(TKey key, int refCount, IEqualityComparer<TKey> comparer)
+            {
+                this.comparer = comparer;
+                this.Key = key;
+                this.RefCount = refCount;
+            }
+
+            public override bool Equals(object obj)
+            {
+                var other = obj as Entry;
+                if (other == null)
+                {
+                    return false;
+                }
+                IEqualityComparer<TKey> equalityComparer = this.comparer ?? EqualityComparer<TKey>.Default;
+                return equalityComparer.Equals(this.Key, other.Key);
+            }
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    IEqualityComparer<TKey> equalityComparer = this.comparer ?? EqualityComparer<TKey>.Default;
+                    return equalityComparer.GetHashCode(this.Key) * 397;
+                }
+            }
         }
 
         class Slot
@@ -74,7 +103,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                         slot.Value = this.objectFactory();
                     }
                     value = slot.Value;
-                    slot.Entries.Add(new Entry { RefCount = 1, Keys = new HashSet<TKey> { key } });
+                    slot.Entries.Add(new Entry(key, 1, this.keyComparer));
                     slot.LastUpdatedTime = DateTime.UtcNow;
                 }
                 else
@@ -120,14 +149,14 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             try
             {
                 await Task.Delay(this.keepAliveTimeout);
-                await this.RemoveAsync(key, index);
+                await this.DisposeAsync(key, index);
             }
             catch (Exception ex) when (!ex.IsFatal())
             {
             }
         }
 
-        async Task RemoveAsync(Slot slot, int index)
+        async Task DisposeAsync(Slot slot, int index)
         {
             TValue value = null;
             lock (this.syncRoot)
@@ -146,7 +175,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         bool IsKeyPresent(Entry x, TKey key)
         {
-            return this.keyComparer == null ? x.Keys.Contains(key) : x.Keys.Contains(key, this.keyComparer);
+            return this.keyComparer?.Equals(key, x.Key) ?? x.Key.Equals(key);
         }
     }
 }

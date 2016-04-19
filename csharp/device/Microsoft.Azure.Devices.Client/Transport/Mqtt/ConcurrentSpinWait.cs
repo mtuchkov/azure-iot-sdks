@@ -44,7 +44,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         /// On a single-CPU machine, <see cref="SpinOnce"/> always yields the processor. On machines with 
         /// multiple CPUs, <see cref="SpinOnce"/> may yield after an unspecified number of calls.
         /// </remarks> 
-        public bool NextSpinWillYield => Volatile.Read(ref this.count) > YieldThreshold || IsSingleProcessor;
+        public bool NextSpinWillYield => IsSingleProcessor || Volatile.Read(ref this.count) > YieldThreshold;
 
         /// <summary>
         /// Performs a single spin. 
@@ -73,7 +73,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 // configured to use the (default) coarse-grained system timer.
                 // 
 
-                long yieldsSoFar = currentCount >= YieldThreshold ? currentCount - YieldThreshold : currentCount;
+                long yieldsSoFar = currentCount >= YieldThreshold ? currentCount : currentCount - YieldThreshold;
 
                 if (yieldsSoFar % Sleep1EveryHowManyTimes == Sleep1EveryHowManyTimes - 1)
                 {
@@ -105,23 +105,13 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
 
             // Finally, increment our spin counter. 
-            do
-            {
-                if (currentCount == YieldThreshold)
-                {
-                    return;
-                }
-                if (Interlocked.CompareExchange(ref this.count, currentCount + 1, currentCount) == currentCount)
-                {
-                    if (currentCount > YieldThreshold)
-                    {
-                        Interlocked.CompareExchange(ref this.count, YieldThreshold, currentCount);
-                    }
-                    break;
-                }
-            }
-            while (true);
 
+            if (currentCount == int.MaxValue)
+            {
+                Interlocked.CompareExchange(ref this.count, YieldThreshold, currentCount);
+                return;
+            }
+            Interlocked.Increment(ref this.count);
         }
 
         public void Reset()
