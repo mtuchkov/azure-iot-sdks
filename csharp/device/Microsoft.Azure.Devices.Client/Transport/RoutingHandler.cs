@@ -75,7 +75,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
             if (lastException != null)
             {
-                throw new InvalidOperationException("Unhandled exception", lastException);
+                throw new InvalidOperationException("Unable to open transport", lastException);
             }
         }
     }

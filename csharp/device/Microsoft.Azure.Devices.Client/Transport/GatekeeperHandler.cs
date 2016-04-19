@@ -18,14 +18,13 @@ namespace Microsoft.Azure.Devices.Client.Transport
         internal bool OpenCalled;
         internal bool CloseCalled;
         volatile TaskCompletionSource<object> openTaskCompletionSource;
+        readonly object thisLock;
 
         public GatekeeperHandler()
         {
-            this.ThisLock = new object();
+            this.thisLock = new object();
             this.openTaskCompletionSource = new TaskCompletionSource<object>(this);
         }
-        
-        protected object ThisLock { get; }
 
         /// <summary>
         /// Explicitly open the DeviceClient instance.
@@ -39,14 +38,14 @@ namespace Microsoft.Azure.Devices.Client.Transport
         /// Close the DeviceClient instance
         /// </summary>
         /// <returns></returns>
-        public override Task CloseAsync()
+        public override async Task CloseAsync()
         {
             TaskCompletionSource<object> localOpenTaskCompletionSource;
-            lock (this.ThisLock)
+            lock (this.thisLock)
             {
                 if (this.CloseCalled)
                 {
-                    return TaskHelpers.CompletedTask;
+                    return;
                 }
 
                 localOpenTaskCompletionSource = this.openTaskCompletionSource;
@@ -55,7 +54,8 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
             localOpenTaskCompletionSource?.TrySetCanceled();
 
-            return base.CloseAsync();
+            await base.CloseAsync();
+            this.Dispose(true);
         }
 
         /// <summary>
@@ -119,13 +119,13 @@ namespace Microsoft.Azure.Devices.Client.Transport
             await base.SendEventAsync(messages);
         }
 
-        protected Task EnsureOpenedAsync(bool explicitOpen)
+        Task EnsureOpenedAsync(bool explicitOpen)
         {
             bool needOpen = false;
             Task openTask;
             if (this.openTaskCompletionSource != null)
             {
-                lock (this.ThisLock)
+                lock (this.thisLock)
                 {
                     if (this.OpenCalled)
                     {
@@ -160,7 +160,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
                     t =>
                     {
                         TaskCompletionSource<object> localOpenTaskCompletionSource = this.openTaskCompletionSource;
-                        lock (this.ThisLock)
+                        lock (this.thisLock)
                         {
                             if (!t.IsFaulted && !t.IsCanceled)
                             {

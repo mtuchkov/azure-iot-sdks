@@ -39,8 +39,13 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             Error = 64
         }
 
+        static readonly string generationId = Guid.NewGuid().ToString();
         static readonly ConcurrentObjectPool<string, IEventLoopGroup> EventLoopGroupPool =
-            new ConcurrentObjectPool<string, IEventLoopGroup>(Environment.ProcessorCount, TimeSpan.FromSeconds(5), elg => elg.ShutdownGracefullyAsync());
+            new ConcurrentObjectPool<string, IEventLoopGroup>(
+                Environment.ProcessorCount, 
+                () => new MultithreadEventLoopGroup(() => new SingleThreadEventLoop("MQTTExecutionThread", TimeSpan.FromSeconds(1)), 1), 
+                TimeSpan.FromSeconds(5), 
+                elg => elg.ShutdownGracefullyAsync());
         
         readonly IPAddress serverAddress;
         readonly Func<IPAddress, int, Task<IChannel>> channelFactory;
@@ -145,16 +150,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         public override async Task SendEventAsync(Message message)
         {
-            try
-            {
-                this.EnsureValidState();
+            this.EnsureValidState();
 
-                await this.channel.WriteAndFlushAsync(message);
-            }
-            catch (Exception ex)
-            {
-                throw;
-            }
+            await this.channel.WriteAndFlushAsync(message);
         }
 
         public override async Task SendEventAsync(IEnumerable<Message> messages)
@@ -183,6 +181,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 if (this.messageQueue.TryDequeue(out message))
                 {
+                    message.LockToken = generationId + message.LockToken;
                     if (this.qos == QualityOfService.AtLeastOnce)
                     {
                         this.completionQueue.Enqueue(message.LockToken);
@@ -210,6 +209,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             string expectedLockToken;
             lock (this.syncRoot)
             {
+                if (!lockToken.StartsWith(generationId))
+                {
+                    throw new IotHubClientException(new InvalidOperationException("Lock token is stale or never existed."));
+                }
                 if (this.completionQueue.Count == 0)
                 {
                     throw new IotHubClientException(new InvalidOperationException("Unknown lock token."));
@@ -441,7 +444,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             return (address, port) =>
             {
-                IEventLoopGroup eventLoopGroup = EventLoopGroupPool.TakeOrAdd(this.eventLoopGroupKey, () => new MultithreadEventLoopGroup(() => new SingleThreadEventLoop("MQTTExecutionThread", TimeSpan.FromSeconds(1)), 1));
+                IEventLoopGroup eventLoopGroup = EventLoopGroupPool.TakeOrAdd(this.eventLoopGroupKey);
                 Bootstrap bootstrap = new Bootstrap().Group(eventLoopGroup).Channel<TcpSocketChannel>().Option(ChannelOption.TcpNodelay, true).Handler(new ActionChannelInitializer<ISocketChannel>(ch => { ch.Pipeline.AddLast(TlsHandler.Client(iotHubConnectionString.HostName, null, (sender, certificate, chain, errors) => true), MqttEncoder.Instance, new MqttDecoder(false, 256 * 1024), this.mqttIotHubAdapterFactory.Create(this.OnConnected, this.OnMessageReceived, this.OnError, iotHubConnectionString, settings)); }));
 
                 this.ScheduleCleanup(() =>

@@ -153,6 +153,7 @@
     <Compile Include="IotHubSingleTokenConnection.cs" />
     <Compile Include="IotHubMuxConnection.cs" />
     <Compile Include="IotHubTokenRefresher.cs" />
+    <Compile Include="Transport\Mqtt\TransientErrorIgnoreStrategy.cs" />
     <Compile Include="Transport\RoutingHandler.cs" />
     <Compile Include="Transport\TransportHandler.cs" />
     <Compile Include="Transport\AmqpClientHelper.cs" />

@@ -5,8 +5,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 {
     using System;
     using System.Threading;
-    using Microsoft.Azure.Devices.Client.Extensions;
-    using Microsoft.Practices.EnterpriseLibrary.TransientFaultHandling;
 
     /// <summary>
     /// Concurrent version of .NET <see cref="System.Threading.SpinWait"/>
@@ -117,7 +115,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 {
                     if (currentCount > YieldThreshold)
                     {
-                        Interlocked.Exchange(ref this.count, YieldThreshold);
+                        Interlocked.CompareExchange(ref this.count, YieldThreshold, currentCount);
                     }
                     break;
                 }
@@ -129,22 +127,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         public void Reset()
         {
             Interlocked.Exchange(ref this.count, 0);
-        }
-    }
-
-    sealed class TransientErrorIgnoreStrategy : ITransientErrorDetectionStrategy
-    {
-        /// <summary>
-        /// Always returns false.
-        /// 
-        /// </summary>
-        /// <param name="ex">The exception.</param>
-        /// <returns>
-        /// Always false.
-        /// </returns>
-        public bool IsTransient(Exception ex)
-        {
-            return !ex.IsFatal();
         }
     }
 }
