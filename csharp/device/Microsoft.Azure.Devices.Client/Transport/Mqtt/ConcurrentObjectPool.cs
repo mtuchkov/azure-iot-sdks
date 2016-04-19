@@ -32,7 +32,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         readonly IEqualityComparer<TKey> keyComparer;
         readonly int poolSize;
         readonly Func<TValue> objectFactory;
-        readonly Slot[] pool;
+        readonly Slot[] slots;
 
         int position;
         readonly object syncRoot = new object();
@@ -49,10 +49,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.keepAliveTimeout = keepAliveTimeout;
             this.disposeCallback = disposeCallback;
             this.keyComparer = keyComparer;
-            this.pool = new Slot[poolSize];
+            this.slots = new Slot[poolSize];
             for (int i = 0; i < poolSize; i++)
             {
-                this.pool[i] = new Slot
+                this.slots[i] = new Slot
                 {
                     Entries = new List<Entry>()
                 };
@@ -63,25 +63,25 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             lock (this.syncRoot)
             {
-                Slot slot = this.pool.FirstOrDefault(s => s.Entries.Any(e => e.Keys.Contains(key)));
+                Slot slot = this.slots.FirstOrDefault(s => s.Entries.Any(x => this.IsKeyPresent(x, key)));
                 TValue value;
 
                 if (slot == null)
                 {
-                    slot = this.pool[this.position++ % this.poolSize];
+                    slot = this.slots[this.position++ % this.poolSize];
                     if (slot.Value == null)
                     {
                         slot.Value = this.objectFactory();
                     }
                     value = slot.Value;
                     slot.Entries.Add(new Entry { RefCount = 1, Keys = new HashSet<TKey> { key } });
-                    slot.LastUpdatedTime = DateTime.Now;
+                    slot.LastUpdatedTime = DateTime.UtcNow;
                 }
                 else
                 {
-                    Entry entry = slot.Entries.First(e => e.Keys.Contains(key));
+                    Entry entry = slot.Entries.First(x => this.IsKeyPresent(x, key));
                     entry.RefCount++;
-                    slot.LastUpdatedTime = DateTime.Now;
+                    slot.LastUpdatedTime = DateTime.UtcNow;
                     value = slot.Value;
                 }
                 return value;
@@ -92,9 +92,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             lock (this.syncRoot)
             {
-                foreach (Slot slot in this.pool)
+                for (int i = 0; i < this.slots.Length; i++)
                 {
-                    Entry entry = slot.Entries.FirstOrDefault(e => e.Keys.Contains(key));
+                    Slot slot = this.slots[i];
+                    Entry entry = slot.Entries.FirstOrDefault(x => this.IsKeyPresent(x, key));
                     if (entry == null)
                     {
                         continue;
@@ -105,7 +106,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                         slot.Entries.Remove(entry);
                         if (slot.Entries.Count == 0)
                         {
-                            this.ScheduleCleanup(key);
+                            this.ScheduleCleanup(slot, i);
                         }
                     }
                     break;
@@ -114,45 +115,38 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             return true;
         }
 
-        async void ScheduleCleanup(TKey key)
+        async void ScheduleCleanup(Slot key, int index)
         {
             try
             {
                 await Task.Delay(this.keepAliveTimeout);
-                await this.RemoveAsync(key);
+                await this.RemoveAsync(key, index);
             }
             catch (Exception ex) when (!ex.IsFatal())
             {
             }
         }
 
-        async Task RemoveAsync(TKey key)
+        async Task RemoveAsync(Slot slot, int index)
         {
             TValue value = null;
             lock (this.syncRoot)
             {
-                foreach (Slot slot in this.pool)
+                if (this.slots[index] != null && this.slots[index] == slot && slot.Entries.Count == 0 && slot.LastUpdatedTime + this.keepAliveTimeout <= DateTime.UtcNow)
                 {
-                    Entry entry = slot.Entries.FirstOrDefault(x => this.keyComparer == null ? x.Keys.Contains(key) : x.Keys.Contains(key, this.keyComparer));
-                    if (entry != null)
-                    {
-                        entry.RefCount--;
-                        if (entry.RefCount == 0)
-                        {
-                            slot.Entries.Remove(entry);
-                        }
-                    }
-                    if (slot.Entries.Count == 0 && slot.LastUpdatedTime + this.keepAliveTimeout <= DateTime.Now)
-                    {
-                        value = slot.Value;
-                    }
-                    break;
+                    value = slot.Value;
+                    this.slots[index] = null;
                 }
             }
             if (value != null)
             {
                 await this.disposeCallback(value);
             }
+        }
+
+        bool IsKeyPresent(Entry x, TKey key)
+        {
+            return this.keyComparer == null ? x.Keys.Contains(key) : x.Keys.Contains(key, this.keyComparer);
         }
     }
 }
