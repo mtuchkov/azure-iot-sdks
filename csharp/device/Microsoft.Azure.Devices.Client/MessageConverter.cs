@@ -9,15 +9,14 @@ namespace Microsoft.Azure.Devices.Client
     using System.IO;
     using System.Runtime.Serialization;
     using System.Text;
-#if !WINDOWS_UWP && !PCL
+
+#if !PCL
+
     using Microsoft.Azure.Amqp;
     using Microsoft.Azure.Amqp.Encoding;
     using Microsoft.Azure.Amqp.Framing;
     using Microsoft.Azure.Devices.Client.Common.Api;
-#endif
 
-
-#if !WINDOWS_UWP && !PCL
     static class MessageConverter
     {
         public const string LockTokenName = "x-opt-lock-token";
@@ -121,11 +120,18 @@ namespace Microsoft.Azure.Devices.Client
                 amqpMessage.Properties.To = data.To;
             }
 
+
+#if WINDOWS_UWP
+            if (!data.ExpiryTimeUtc.Equals(default(DateTimeOffset)))
+            {
+                amqpMessage.Properties.AbsoluteExpiryTime = data.ExpiryTimeUtc.DateTime;
+            }
+#else
             if (!data.ExpiryTimeUtc.Equals(default(DateTime)))
             {
                 amqpMessage.Properties.AbsoluteExpiryTime = data.ExpiryTimeUtc;
             }
-
+#endif
             if (data.CorrelationId != null)
             {
                 amqpMessage.Properties.CorrelationId = data.CorrelationId;
@@ -340,8 +346,13 @@ namespace Microsoft.Azure.Devices.Client
                 memoryStream.Write(readBuffer, 0, bytesRead);
             }
 
+#if WINDOWS_UWP
+            // UWP doesn't have GetBuffer. ToArray creates a copy -- make sure perf impact is acceptable
+            return new ArraySegment<byte>(memoryStream.ToArray(), 0, (int)memoryStream.Length);
+#else
             return new ArraySegment<byte>(memoryStream.GetBuffer(), 0, (int)memoryStream.Length);
+#endif
         }
     }
 #endif
-}
+        }

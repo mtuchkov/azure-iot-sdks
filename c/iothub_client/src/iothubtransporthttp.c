@@ -5,24 +5,25 @@
 #ifdef _CRTDBG_MAP_ALLOC
 #include <crtdbg.h>
 #endif
-#include "gballoc.h"
+#include "azure_c_shared_utility/gballoc.h"
 
 #include <time.h>
 #include "iothub_client_version.h"
 #include "iothub_client_private.h"
+#include "iothub_transport_ll.h"
 #include "iothubtransporthttp.h"
 
-#include "httpapiexsas.h"
-#include "urlencode.h"
-#include "iot_logging.h"
-#include "httpapiex.h"
-#include "httpapiexsas.h"
-#include "strings.h"
-#include "base64.h"
-#include "doublylinkedlist.h"
-#include "vector.h"
-#include "httpheaders.h"
-#include "agenttime.h"
+#include "azure_c_shared_utility/httpapiexsas.h"
+#include "azure_c_shared_utility/urlencode.h"
+#include "azure_c_shared_utility/iot_logging.h"
+#include "azure_c_shared_utility/httpapiex.h"
+#include "azure_c_shared_utility/httpapiexsas.h"
+#include "azure_c_shared_utility/strings.h"
+#include "azure_c_shared_utility/base64.h"
+#include "azure_c_shared_utility/doublylinkedlist.h"
+#include "azure_c_shared_utility/vector.h"
+#include "azure_c_shared_utility/httpheaders.h"
+#include "azure_c_shared_utility/agenttime.h"
 
 #define IOTHUB_APP_PREFIX "iothub-app-"
 const char* IOTHUB_MESSAGE_ID = "iothub-messageid";
@@ -1879,7 +1880,7 @@ void IoTHubTransportHttp_DoWork(TRANSPORT_LL_HANDLE handle, IOTHUB_CLIENT_LL_HAN
 	/*Codes_SRS_TRANSPORTMULTITHTTP_17_140: [ If iotHubClientHandle is NULL, then IoTHubTransportHttp_DoWork shall do nothing. ]*/
 
 	(void)iotHubClientHandle; // use the perDevice handle.
-    if ((handle != NULL) && (iotHubClientHandle != NULL))
+    if (handle != NULL)
     {
 		HTTPTRANSPORT_HANDLE_DATA* handleData = (HTTPTRANSPORT_HANDLE_DATA*)handle;
 		IOTHUB_DEVICE_HANDLE* listItem;

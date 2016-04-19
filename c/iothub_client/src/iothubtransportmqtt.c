@@ -5,23 +5,24 @@
 #ifdef _CRTDBG_MAP_ALLOC
 #include <crtdbg.h>
 #endif
-#include "gballoc.h"
+#include "azure_c_shared_utility/gballoc.h"
 
-#include "iot_logging.h"
-#include "strings.h"
-#include "doublylinkedlist.h"
-#include "crt_abstractions.h"
+#include "azure_c_shared_utility/iot_logging.h"
+#include "azure_c_shared_utility/strings.h"
+#include "azure_c_shared_utility/doublylinkedlist.h"
+#include "azure_c_shared_utility/crt_abstractions.h"
 
 #include "iothub_client_ll.h"
 #include "iothub_client_private.h"
 #include "iothubtransportmqtt.h"
-#include "mqtt_client.h"
-#include "sastoken.h"
-#include "tickcounter.h"
+#include "azure_umqtt_c/mqtt_client.h"
+#include "azure_c_shared_utility/sastoken.h"
+#include "azure_c_shared_utility/tickcounter.h"
 
-#include "tlsio.h"
-#include "platform.h"
+#include "azure_c_shared_utility/tlsio.h"
+#include "azure_c_shared_utility/platform.h"
 
+#include "azure_c_shared_utility/string_tokenizer.h"
 #include "iothub_client_version.h"
 
 #include <stdarg.h>
@@ -29,7 +30,7 @@
 
 #define SAS_TOKEN_DEFAULT_LIFETIME  3600
 #define EPOCH_TIME_T_VALUE          0
-#define DEFAULT_MQTT_KEEPALIVE      5*60 // 5 min
+#define DEFAULT_MQTT_KEEPALIVE      4*60 // 4 min
 #define DEFAULT_PORT_NUMBER         8883
 #define DEFAULT_TEMP_STRING_LEN     256
 #define BUILD_CONFIG_USERNAME       24
@@ -37,6 +38,27 @@
 #define SAS_TOKEN_DEFAULT_LEN       10
 #define RESEND_TIMEOUT_VALUE_MIN    1*60
 #define MAX_SEND_RECOUNT_LIMIT      2
+
+static const char* DEVICE_MSG_TOPIC = "devices/%s/messages/devicebound/#";
+static const char* DEVICE_DEVICE_TOPIC = "devices/%s/messages/events/";
+static const char* PROPERTY_SEPARATOR = "&";
+
+typedef struct SYSTEM_PROPERTY_INFO_TAG
+{
+    const char* propName;
+    size_t propLength;
+} SYSTEM_PROPERTY_INFO;
+
+static SYSTEM_PROPERTY_INFO sysPropList[] = {
+    { "%24.exp", 7 },
+    { "%24.mid", 7 },
+    { "%24.uid", 7 },
+    { "%24.to", 6 },
+    { "%24.cid", 7 },
+    { "devices/", 8 },
+    { "iothub-operation", 16 },
+    { "iothub-ack", 10 }
+};
 
 TICK_COUNTER_HANDLE g_msgTickCounter;
 
@@ -102,28 +124,192 @@ static void sendMsgComplete(IOTHUB_MESSAGE_LIST* iothubMsgList, PMQTTTRANSPORT_H
     IoTHubClient_LL_SendComplete(transportState->llClientHandle, &messageCompleted, batchResult);
 }
 
+static STRING_HANDLE addPropertiesTouMqttMessage(IOTHUB_MESSAGE_HANDLE iothub_message_handle, const char* eventTopic)
+{
+    STRING_HANDLE result = STRING_construct(eventTopic);
+    const char* const* propertyKeys;
+    const char* const* propertyValues;
+    size_t propertyCount;
+
+    // Construct Properties
+    MAP_HANDLE properties_map = IoTHubMessage_Properties(iothub_message_handle);
+    if (properties_map != NULL)
+    {
+        if (Map_GetInternals(properties_map, &propertyKeys, &propertyValues, &propertyCount) != MAP_OK)
+        {
+            LogError("Failed to get the internals of the property map.\r\n");
+            STRING_delete(result);
+            result = NULL;
+        }
+        else
+        {
+            if (propertyCount != 0)
+            {
+                for (size_t index = 0; index < propertyCount; index++)
+                {
+                    size_t len = strlen(propertyKeys[index]) + strlen(propertyValues[index]) + 2;
+                    char* propValues = malloc(len+1);
+                    if (propValues == NULL)
+                    {
+                        STRING_delete(result);
+                        result = NULL;
+                        break;
+                    }
+                    else
+                    {
+                        sprintf(propValues, "%s=%s%s", propertyKeys[index], propertyValues[index], propertyCount - 1 == index ? "" : "&");
+                        if (STRING_concat(result, propValues) != 0)
+                        {
+                            STRING_delete(result);
+                            result = NULL;
+                            break;
+                        }
+                        free(propValues);
+                    }
+                }
+            }
+        }
+    }
+    return result;
+}
+
 static int publishMqttMessage(PMQTTTRANSPORT_HANDLE_DATA transportState, MQTT_MESSAGE_DETAILS_LIST* mqttMsgEntry, const unsigned char* payload, size_t len)
 {
     int result;
-    MQTT_MESSAGE_HANDLE mqttMsg = mqttmessage_create(transportState->packetId++, STRING_c_str(transportState->mqttEventTopic), DELIVER_AT_LEAST_ONCE, payload, len);
-    if (mqttMsg == NULL)
+    STRING_HANDLE msgTopic = addPropertiesTouMqttMessage(mqttMsgEntry->iotHubMessageEntry->messageHandle, STRING_c_str(transportState->mqttEventTopic));
+    if (msgTopic == NULL)
     {
         result = __LINE__;
     }
     else
     {
-        if (mqtt_client_publish(transportState->mqttClient, mqttMsg) != 0)
+        MQTT_MESSAGE_HANDLE mqttMsg = mqttmessage_create(transportState->packetId++, STRING_c_str(msgTopic), DELIVER_AT_LEAST_ONCE, payload, len);
+        if (mqttMsg == NULL)
         {
             result = __LINE__;
         }
         else
         {
-            mqttMsgEntry->retryCount++;
-            (void)tickcounter_get_current_ms(g_msgTickCounter, &mqttMsgEntry->msgPublishTime);
-            result = 0;
+            if (mqtt_client_publish(transportState->mqttClient, mqttMsg) != 0)
+            {
+                result = __LINE__;
+            }
+            else
+            {
+                mqttMsgEntry->retryCount++;
+                (void)tickcounter_get_current_ms(g_msgTickCounter, &mqttMsgEntry->msgPublishTime);
+                result = 0;
+            }
+            mqttmessage_destroy(mqttMsg);
         }
-        mqttmessage_destroy(mqttMsg);
+        STRING_delete(msgTopic);
     }
+    return result;
+}
+
+static bool isSystemProperty(const char* tokenData)
+{
+    bool result = false;
+    size_t propCount = sizeof(sysPropList)/sizeof(sysPropList[0]);
+    for (size_t index = 0; index < propCount; index++)
+    {
+        if (memcmp(tokenData, sysPropList[index].propName, sysPropList[index].propLength) == 0)
+        {
+            result = true;
+            break;
+        }
+    }
+    return result;
+}
+
+static int extractMqttProperties(IOTHUB_MESSAGE_HANDLE IoTHubMessage, MQTT_MESSAGE_HANDLE msgHandle)
+{
+    int result;
+    STRING_HANDLE mqttTopic = STRING_construct(mqttmessage_getTopicName(msgHandle));
+
+    STRING_TOKENIZER_HANDLE token = STRING_TOKENIZER_create(mqttTopic);
+    if (token != NULL)
+    {
+        MAP_HANDLE propertyMap = IoTHubMessage_Properties(IoTHubMessage);
+        if (propertyMap == NULL)
+        {
+            LogError("Failure to retrieve IoTHubMessage_properties.\r\n");
+            result = __LINE__;
+        }
+        else
+        {
+            STRING_HANDLE output = STRING_new();
+            if (output == NULL)
+            {
+                LogError("Failure to allocate STRING_new.\r\n");
+                result = __LINE__;
+            }
+            else
+            {
+                result = 0;
+                while (STRING_TOKENIZER_get_next_token(token, output, PROPERTY_SEPARATOR) == 0 && result == 0)
+                {
+                    const char* tokenData = STRING_c_str(output);
+                    size_t tokenLen = strlen(tokenData);
+                    if (tokenData == NULL || tokenLen == 0)
+                    {
+                        break;
+                    }
+                    else
+                    {
+                        if (!isSystemProperty(tokenData) )
+                        {
+                            const char* iterator = tokenData;
+                            while (iterator != NULL && *iterator != '\0' && result == 0)
+                            {
+                                if (*iterator == '=')
+                                {
+                                    size_t nameLen = iterator - tokenData;
+                                    char* propName = malloc(nameLen + 1);
+
+                                    size_t valLen = tokenLen - (nameLen + 1) + 1;
+                                    char* propValue = malloc(valLen + 1);
+
+                                    if (propName == NULL || propValue == NULL)
+                                    {
+                                        result = __LINE__;
+                                    }
+                                    else
+                                    {
+                                        strncpy(propName, tokenData, nameLen);
+                                        propName[nameLen] = '\0';
+
+                                        strncpy(propValue, iterator + 1, valLen);
+                                        propValue[valLen] = '\0';
+
+                                        if (Map_AddOrUpdate(propertyMap, propName, propValue) != MAP_OK)
+                                        {
+                                            LogError("Map_AddOrUpdate failed.\r\n");
+                                            result = __LINE__;
+                                        }
+                                    }
+                                    free(propName);
+                                    free(propValue);
+
+                                    break;
+                                }
+                                iterator++;
+                            }
+                        }
+                    }
+                }
+                STRING_delete(output);
+            }
+        }
+        STRING_TOKENIZER_destroy(token);
+    }
+    else
+    {
+        LogError("Unable to create Tokenizer object .\r\n");
+        result = __LINE__;
+    }
+    STRING_delete(mqttTopic);
+
     return result;
 }
 
@@ -139,6 +325,8 @@ static void MqttRecvCallback(MQTT_MESSAGE_HANDLE msgHandle, void* callbackCtx)
         }
         else
         {
+            // Will need to update this when the service has messages that can be rejected
+            (void)extractMqttProperties(IoTHubMessage, msgHandle);
             PMQTTTRANSPORT_HANDLE_DATA transportData = (PMQTTTRANSPORT_HANDLE_DATA)callbackCtx;
             if (IoTHubClient_LL_MessageCallback(transportData->llClientHandle, IoTHubMessage) != IOTHUBMESSAGE_ACCEPTED)
             {
@@ -360,7 +548,7 @@ static STRING_HANDLE ConstructEventTopic(const char* deviceId)
     }
     else
     {
-        (void)sprintf(eventTopic, "devices/%s/messages/events/", deviceId);
+        (void)sprintf(eventTopic, DEVICE_DEVICE_TOPIC, deviceId);
         result = STRING_construct(eventTopic);
         free(eventTopic);
     }
@@ -379,9 +567,45 @@ static STRING_HANDLE ConstructMessageTopic(const char* deviceId)
     }
     else
     {
-        (void)sprintf(messageTopic, "devices/%s/messages/devicebound/#", deviceId);
+        (void)sprintf(messageTopic, DEVICE_MSG_TOPIC, deviceId);
         result = STRING_construct(messageTopic);
         free(messageTopic);
+    }
+    return result;
+}
+
+static int GetTransportProviderIfNecessary(PMQTTTRANSPORT_HANDLE_DATA transportState)
+{
+    int result;
+
+    if (transportState->xioTransport == NULL)
+    {
+        // construct address
+        const char* hostAddress = STRING_c_str(transportState->hostAddress);
+        const char* hostName = strstr(hostAddress, "//");
+        if (hostName == NULL)
+        {
+            hostName = hostAddress;
+        }
+        else
+        {
+            // Increment beyond the double backslash
+            hostName += 2;
+        }
+        transportState->xioTransport = getIoTransportProvider(hostName, transportState->portNum);
+        if (transportState->xioTransport == NULL)
+        {
+            LogError("Unable to create the lower level TLS layer.\r\n");
+            result = __LINE__;
+        }
+        else
+        {
+            result = 0;
+        }
+    }
+    else
+    {
+        result = 0;
     }
     return result;
 }
@@ -412,32 +636,21 @@ static int SendMqttConnectMsg(PMQTTTRANSPORT_HANDLE_DATA transportState)
         options.useCleanSession = false;
         options.qualityOfServiceValue = DELIVER_AT_LEAST_ONCE;
 
-        // construct address
-        const char* hostAddress = STRING_c_str(transportState->hostAddress);
-        const char* hostName = strstr(hostAddress, "//");
-        if (hostName == NULL)
+        if ((result = GetTransportProviderIfNecessary(transportState)) == 0)
         {
-            hostName = hostAddress;
+            if (mqtt_client_connect(transportState->mqttClient, transportState->xioTransport, &options) != 0)
+            {
+                LogError("failure connecting to address %s:%d.\r\n", STRING_c_str(transportState->hostAddress), transportState->portNum);
+                result = __LINE__;
+            }
+            else
+            {
+                result = 0;
+            }
         }
-        else
-        {
-            // Increment beyond the double backslash
-            hostName += 2;
-        }
-
-        transportState->xioTransport = getIoTransportProvider(hostName, transportState->portNum);
-        if (mqtt_client_connect(transportState->mqttClient, transportState->xioTransport, &options) != 0)
-        {
-            LogError("failure connecting to address %s:%d.\r\n", STRING_c_str(transportState->hostAddress), transportState->portNum);
-            result = __LINE__;
-        }
-        else
-        {
-            result = 0;
-        }
-        STRING_delete(emptyKeyName);
-        STRING_delete(sasToken);
     }
+    STRING_delete(emptyKeyName);
+    STRING_delete(sasToken);
     return result;
 }
 
@@ -922,8 +1135,23 @@ IOTHUB_CLIENT_RESULT IoTHubTransportMqtt_SetOption(TRANSPORT_LL_HANDLE handle, c
         }
         else
         {
-            /* Codes_SRS_IOTHUB_MQTT_TRANSPORT_07_032: [IoTHubTransportMqtt_SetOption shall return IOTHUB_CLIENT_INVALID_ARG if the option parameter is not a known option string*] */
-            result = IOTHUB_CLIENT_INVALID_ARG;
+            /* Codes_SRS_IOTHUB_MQTT_TRANSPORT_07_032: [IoTHubTransportMqtt_SetOption shall pass down the option to xio_setoption if the option parameter is not a known option string for the MQTT transport.] */
+            if (GetTransportProviderIfNecessary(transportState) == 0)
+            {
+                if (xio_setoption(transportState->xioTransport, option, value) == 0)
+                {
+                    result = IOTHUB_CLIENT_OK;
+                }
+                else
+                {
+                    /* Codes_SRS_IOTHUB_MQTT_TRANSPORT_07_132: [IoTHubTransportMqtt_SetOption shall return IOTHUB_CLIENT_INVALID_ARG xio_setoption fails] */
+                    result = IOTHUB_CLIENT_INVALID_ARG;
+                }
+            }
+            else
+            {
+                result = IOTHUB_CLIENT_ERROR;
+            }
         }
     }
     return result;

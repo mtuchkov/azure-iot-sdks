@@ -3,6 +3,15 @@
   "version": 2,
   "targets": {
     "UAP,Version=v10.0": {
+      "Microsoft.Azure.Amqp/1.1.0": {
+        "type": "package",
+        "compile": {
+          "lib/uap10.0/Microsoft.Azure.Amqp.Uwp.dll": {}
+        },
+        "runtime": {
+          "lib/uap10.0/Microsoft.Azure.Amqp.Uwp.dll": {}
+        }
+      },
       "Microsoft.CSharp/4.0.0": {
         "type": "package",
         "dependencies": {
@@ -1917,6 +1926,15 @@
       }
     },
     "UAP,Version=v10.0/win10-arm": {
+      "Microsoft.Azure.Amqp/1.1.0": {
+        "type": "package",
+        "compile": {
+          "lib/uap10.0/Microsoft.Azure.Amqp.Uwp.dll": {}
+        },
+        "runtime": {
+          "lib/uap10.0/Microsoft.Azure.Amqp.Uwp.dll": {}
+        }
+      },
       "Microsoft.CSharp/4.0.0": {
         "type": "package",
         "dependencies": {
@@ -3688,6 +3706,15 @@
       }
     },
     "UAP,Version=v10.0/win10-arm-aot": {
+      "Microsoft.Azure.Amqp/1.1.0": {
+        "type": "package",
+        "compile": {
+          "lib/uap10.0/Microsoft.Azure.Amqp.Uwp.dll": {}
+        },
+        "runtime": {
+          "lib/uap10.0/Microsoft.Azure.Amqp.Uwp.dll": {}
+        }
+      },
       "Microsoft.CSharp/4.0.0": {
         "type": "package",
         "dependencies": {
@@ -5422,6 +5449,15 @@
       }
     },
     "UAP,Version=v10.0/win10-x64": {
+      "Microsoft.Azure.Amqp/1.1.0": {
+        "type": "package",
+        "compile": {
+          "lib/uap10.0/Microsoft.Azure.Amqp.Uwp.dll": {}
+        },
+        "runtime": {
+          "lib/uap10.0/Microsoft.Azure.Amqp.Uwp.dll": {}
+        }
+      },
       "Microsoft.CSharp/4.0.0": {
         "type": "package",
         "dependencies": {
@@ -7200,6 +7236,15 @@
       }
     },
     "UAP,Version=v10.0/win10-x64-aot": {
+      "Microsoft.Azure.Amqp/1.1.0": {
+        "type": "package",
+        "compile": {
+          "lib/uap10.0/Microsoft.Azure.Amqp.Uwp.dll": {}
+        },
+        "runtime": {
+          "lib/uap10.0/Microsoft.Azure.Amqp.Uwp.dll": {}
+        }
+      },
       "Microsoft.CSharp/4.0.0": {
         "type": "package",
         "dependencies": {
@@ -8934,6 +8979,15 @@
       }
     },
     "UAP,Version=v10.0/win10-x86": {
+      "Microsoft.Azure.Amqp/1.1.0": {
+        "type": "package",
+        "compile": {
+          "lib/uap10.0/Microsoft.Azure.Amqp.Uwp.dll": {}
+        },
+        "runtime": {
+          "lib/uap10.0/Microsoft.Azure.Amqp.Uwp.dll": {}
+        }
+      },
       "Microsoft.CSharp/4.0.0": {
         "type": "package",
         "dependencies": {
@@ -10712,6 +10766,15 @@
       }
     },
     "UAP,Version=v10.0/win10-x86-aot": {
+      "Microsoft.Azure.Amqp/1.1.0": {
+        "type": "package",
+        "compile": {
+          "lib/uap10.0/Microsoft.Azure.Amqp.Uwp.dll": {}
+        },
+        "runtime": {
+          "lib/uap10.0/Microsoft.Azure.Amqp.Uwp.dll": {}
+        }
+      },
       "Microsoft.CSharp/4.0.0": {
         "type": "package",
         "dependencies": {
@@ -12447,6 +12510,17 @@
     }
   },
   "libraries": {
+    "Microsoft.Azure.Amqp/1.1.0": {
+      "sha512": "YaGjxkotU2ZeLnM/Q/Xa0V64IgiOHXiyc7B5GHvDFMX/xEIscIQuQv8Bw0e7z2fQJVC1SplYWgCECi84cqokCw==",
+      "type": "package",
+      "files": [
+        "Microsoft.Azure.Amqp.1.1.0.nupkg.sha512",
+        "Microsoft.Azure.Amqp.nuspec",
+        "lib/net451/Microsoft.Azure.Amqp.XML",
+        "lib/net451/Microsoft.Azure.Amqp.dll",
+        "lib/uap10.0/Microsoft.Azure.Amqp.Uwp.dll"
+      ]
+    },
     "Microsoft.CSharp/4.0.0": {
       "sha512": "oWqeKUxHXdK6dL2CFjgMcaBISbkk+AqEg+yvJHE4DElNzS4QaTsCflgkkqZwVlWby1Dg9zo9n+iCAMFefFdJ/A==",
       "type": "Package",
@@ -15876,6 +15950,7 @@
   },
   "projectFileDependencyGroups": {
     "": [
+      "Microsoft.Azure.Amqp >= 1.1.0",
       "Microsoft.NETCore.UniversalWindowsPlatform >= 5.0.0",
       "Newtonsoft.Json >= 6.0.8",
       "PCLCrypto >= 1.0.86",

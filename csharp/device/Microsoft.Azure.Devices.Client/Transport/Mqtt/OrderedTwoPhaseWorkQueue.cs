@@ -64,9 +64,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         public override void Abort(Exception exception)
         {
-            State stateBefore = this.state;
+            States stateBefore = this.State;
             base.Abort(exception);
-            if (stateBefore != this.state && this.state == State.Aborted)
+            if (stateBefore != this.State && this.State == States.Aborted)
             {
                 Queue<IncompleteWorkItem> queue = this.incompleteQueue;
                 while (queue.Count > 0)

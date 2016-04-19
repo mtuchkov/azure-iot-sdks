@@ -51,7 +51,6 @@ namespace Microsoft.Azure.Devices.Client.Transport
                 DefaultOperationTimeout,
                 null);
         }
-
 #else
         internal HttpTransportHandler(IotHubConnectionString iotHubConnectionString)
             : this(iotHubConnectionString, new Http1TransportSettings())
@@ -71,7 +70,6 @@ namespace Microsoft.Azure.Devices.Client.Transport
                 null);
         }
 #endif
-
         /// <summary>
         /// Create a DeviceClient from individual parameters
         /// </summary>

@@ -9,6 +9,7 @@ import com.microsoft.azure.iothub.transport.IotHubReceiveTask;
 import com.microsoft.azure.iothub.transport.IotHubSendTask;
 import com.microsoft.azure.iothub.transport.IotHubTransport;
 import com.microsoft.azure.iothub.transport.mqtt.MqttTransport;
+import java.io.Closeable;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
@@ -39,7 +40,7 @@ import java.util.concurrent.TimeUnit;
  * </p>
  * The client supports HTTPS 1.1 and AMQPS 1.0 transports.
  */
-public final class DeviceClient
+public final class DeviceClient implements Closeable
 {
     /** The state of the IoT Hub client's connection with the IoT Hub. */
     protected enum IotHubClientState
@@ -326,7 +327,8 @@ public final class DeviceClient
                 RECEIVE_PERIOD_MILLIS = RECEIVE_PERIOD_MILLIS_HTTPS;
                 break;
             case AMQPS:
-                this.transport = new AmqpsTransport(this.config);
+            case AMQPS_WS:
+                this.transport = new AmqpsTransport(this.config, protocol);
                 RECEIVE_PERIOD_MILLIS = RECEIVE_PERIOD_MILLIS_AMQPS;
                 break;
             case MQTT:

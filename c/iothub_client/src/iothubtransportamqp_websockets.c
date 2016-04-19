@@ -2,7 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
 #include "iothubtransportamqp_websockets.h"
-#include "wsio.h"
+#include "azure_uamqp_c/wsio.h"
 #include "iothubtransportamqp.c"
 
 #define DEFAULT_WS_PROTOCOL_NAME "AMQPWSB10"
@@ -32,6 +32,8 @@ static TRANSPORT_PROVIDER thisTransportProvider_WebSocketsOverTls = {
 	IoTHubTransportAMQP_SetOption,
 	IoTHubTransportAMQP_Create_WebSocketsOverTls,
 	IoTHubTransportAMQP_Destroy,
+	IoTHubTransportAMQP_Register,
+    IoTHubTransportAMQP_Unregister,
 	IoTHubTransportAMQP_Subscribe,
 	IoTHubTransportAMQP_Unsubscribe,
 	IoTHubTransportAMQP_DoWork,

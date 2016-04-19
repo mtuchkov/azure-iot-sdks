@@ -5,12 +5,14 @@ namespace Microsoft.Azure.Devices.Client
 {
     using System.Collections.Concurrent;
     using System.Collections.Generic;
+    using System.Threading;
 
-#if !WINDOWS_UWP && !PCL
-    sealed class IotHubConnectionCache
+#if !PCL
+    class IotHubConnectionCache
     {
         readonly ConcurrentDictionary<IotHubConnectionString, IotHubScopeConnectionPool> hubScopeConnectionPools;
         readonly ConcurrentDictionary<IotHubConnectionString, IotHubDeviceScopeConnectionPool> deviceScopeConnectionPools;
+        AmqpTransportSettings amqpTransportSettings;
 
         public IotHubConnectionCache()
         {
@@ -18,63 +20,67 @@ namespace Microsoft.Azure.Devices.Client
             this.deviceScopeConnectionPools = new ConcurrentDictionary<IotHubConnectionString, IotHubDeviceScopeConnectionPool>(new DeviceScopeConnectionPoolStringComparer());
         }
 
-        public IotHubConnection GetConnection(IotHubConnectionString connectionString, AmqpTransportSettings amqpTransportSettings)
+        // Making this virtual to allow Moq to override
+        public virtual IotHubConnection GetConnection(IotHubConnectionString connectionString, AmqpTransportSettings amqpTransportSetting)
         {
-            IotHubConnection iotHubConnection;
-            // Use connection caching for both hub-scope and device-scope connection strings
-            if (connectionString.SharedAccessKeyName != null)
+            // Only the initial transportSetting is used, subsequent ones are ignored
+            if (this.amqpTransportSettings == null)
             {
-                IotHubScopeConnectionPool connectionReferenceCounter;
+                Interlocked.CompareExchange(ref this.amqpTransportSettings, amqpTransportSetting, null);
+            }
+
+            IotHubConnection iotHubConnection;
+            if (connectionString.SharedAccessKeyName != null  || connectionString.SharedAccessSignature != null)
+            {
+                // Connections are not pooled when SAS signatures are used. However, we still use a connection pool object
+                // Connections are not shared since the SAS signature will not match another connection string
+                IotHubScopeConnectionPool iotHubScopeConnectionPool;
                 do
                 {
-                    connectionReferenceCounter = this.hubScopeConnectionPools.GetOrAdd(connectionString, k => new IotHubScopeConnectionPool(this, k, amqpTransportSettings));
+                    iotHubScopeConnectionPool = 
+                        this.hubScopeConnectionPools.GetOrAdd(
+                            connectionString, 
+                            k => new IotHubScopeConnectionPool(this, k, this.amqpTransportSettings)
+                            );
                 }
-                while (!connectionReferenceCounter.TryAddRef());
+                while (!iotHubScopeConnectionPool.TryAddRef());
 
-                iotHubConnection = connectionReferenceCounter.Connection;
+                iotHubConnection = iotHubScopeConnectionPool.Connection;
             }
-            else if (amqpTransportSettings.AmqpConnectionPoolSettings.Pooling)
+            else if (this.amqpTransportSettings.AmqpConnectionPoolSettings.Pooling)
             {
+                // use connection pooling for device scope connection string
                 do
                 {
                     IotHubDeviceScopeConnectionPool iotHubDeviceScopeConnectionPool =
                         this.deviceScopeConnectionPools.GetOrAdd(
                             connectionString,
-                            k => new IotHubDeviceScopeConnectionPool(this, k, amqpTransportSettings)
+                            k => new IotHubDeviceScopeConnectionPool(this, k, this.amqpTransportSettings)
                             );
-                    iotHubConnection = iotHubDeviceScopeConnectionPool.GetConnection();
+                    iotHubConnection = iotHubDeviceScopeConnectionPool.GetConnection(connectionString.DeviceId);
                 }
                 while (iotHubConnection == null);
             }
             else
             {
                 // Connection pooling is turned off for device-scope connection strings
-                iotHubConnection =  new IotHubMuxConnection(null, connectionString, amqpTransportSettings);
+                iotHubConnection =  new IotHubSingleTokenConnection(null, connectionString, this.amqpTransportSettings);
             }
 
             return iotHubConnection;
         }
 
-        public bool RemoveHubScopeConnectionPool(IotHubConnectionString connectionString)
+        // Making this virtual to allow Moq to override
+        public virtual bool RemoveHubScopeConnectionPool(IotHubConnectionString connectionString)
         {
             IotHubScopeConnectionPool iotHubScopeConnectionPool;
-            if (this.hubScopeConnectionPools.TryRemove(connectionString, out iotHubScopeConnectionPool))
-            {
-                return true;
-            }
-
-            return false;
+            return this.hubScopeConnectionPools.TryRemove(connectionString, out iotHubScopeConnectionPool);
         }
 
         public bool RemoveDeviceScopeConnectionPool(IotHubConnectionString connectionString)
         {
             IotHubDeviceScopeConnectionPool iotHubDeviceScopeConnectionPool;
-            if (this.deviceScopeConnectionPools.TryRemove(connectionString, out iotHubDeviceScopeConnectionPool))
-            {
-                return true;
-            }
-
-            return false;
+            return this.deviceScopeConnectionPools.TryRemove(connectionString, out iotHubDeviceScopeConnectionPool);
         }
 
         // A comparer used to see if two IotHubConnectionStrings can share a common AmqpConnection between them.
@@ -112,7 +118,7 @@ namespace Microsoft.Azure.Devices.Client
                     HashCode.SafeGet(connectionString.SharedAccessKey),
                     HashCode.SafeGet(connectionString.SharedAccessKeyName),
                     HashCode.SafeGet(connectionString.SharedAccessSignature));
-            }
+           }
         }
 
         class DeviceScopeConnectionPoolStringComparer : IEqualityComparer<IotHubConnectionString>

@@ -6,13 +6,13 @@ namespace Microsoft.Azure.Devices.Client
     using System;
     using System.Threading.Tasks;
 
-#if !WINDOWS_UWP
+#if !PCL
     using Microsoft.Azure.Amqp;
 #endif
 
     sealed class IotHubTokenRefresher
     {
-#if !WINDOWS_UWP
+#if !PCL
         static readonly TimeSpan RefreshTokenBuffer = TimeSpan.FromMinutes(2);
         static readonly TimeSpan RefreshTokenRetryInterval = TimeSpan.FromSeconds(30);
         static readonly string[] AccessRightsStringArray = AccessRightsHelper.AccessRightsToStringArray(AccessRights.DeviceConnect);
@@ -32,7 +32,6 @@ namespace Microsoft.Azure.Devices.Client
             this.amqpSession = amqpSession;
             this.connectionString = connectionString;
             this.audience = audience;
-            this.taskCancelled = false;
         }
 
         public void Cancel()
@@ -51,49 +50,90 @@ namespace Microsoft.Azure.Devices.Client
                 this.connectionString.AmqpEndpoint.AbsoluteUri,
                 AccessRightsStringArray,
                 timeout);
-
-            this.SendCbsTokenLoopAsync(timeout).Fork();
+            this.SendCbsTokenLoopAsync(expiresAtUtc, timeout).Fork();
         }
 
-        async Task SendCbsTokenLoopAsync(TimeSpan timeout)
+        async Task SendCbsTokenLoopAsync(DateTime expiryTimeUtc, TimeSpan timeout)
         {
-            while (!this.amqpSession.IsClosing())
+            bool continueSendingTokens = await WaitUntilNextTokenSendTime(expiryTimeUtc);
+
+            if (!continueSendingTokens)
             {
-                if (this.taskCancelled)
-                {
-                    break;
-                }
+                return;
+            }
 
-                var cbsLink = this.amqpSession.Connection.Extensions.Find<AmqpCbsLink>();
-                if (cbsLink != null)
+            try
+            {
+                while (!this.amqpSession.IsClosing())
                 {
-                    try
+                    if (this.taskCancelled)
                     {
-                        var expiresAtUtc = await cbsLink.SendTokenAsync(
-                             this.connectionString,
-                             this.connectionString.AmqpEndpoint,
-                             this.audience,
-                             this.connectionString.AmqpEndpoint.AbsoluteUri,
-                             AccessRightsStringArray,
-                             timeout);
-                        await Task.Delay(RefreshTokenBuffer);
+                        break;
                     }
-                    catch (Exception exception)
+
+                    var cbsLink = this.amqpSession.Connection.Extensions.Find<AmqpCbsLink>();
+                    if (cbsLink != null)
                     {
-                        if (Fx.IsFatal(exception))
+                        try
                         {
-                            throw;
-                        }
+                            var expiresAtUtc = await cbsLink.SendTokenAsync(
+                                 this.connectionString,
+                                 this.connectionString.AmqpEndpoint,
+                                 this.audience,
+                                 this.connectionString.AmqpEndpoint.AbsoluteUri,
+                                 AccessRightsStringArray,
+                                 timeout);
 
-                        await Task.Delay(RefreshTokenRetryInterval);
+                            continueSendingTokens = await WaitUntilNextTokenSendTime(expiresAtUtc);
+                            if (!continueSendingTokens)
+                            {
+                                break;
+                            }
+                        }
+                        catch (Exception exception)
+                        {
+                            if (Fx.IsFatal(exception))
+                            {
+                                throw;
+                            }
+
+                            await Task.Delay(RefreshTokenRetryInterval);
+                        }
                     }
-                }
-                else
-                {
-                    break;
+                    else
+                    {
+                        break;
+                    }
                 }
             }
+            catch (Exception e)
+            {
+                if (Fx.IsFatal(e))
+                {
+                    throw;
+                }
+
+                // ignore other exceptions
+            }
         }
-    }
+
+        static async Task<bool> WaitUntilNextTokenSendTime(DateTime expiresAtUtc)
+        {
+            var waitTime = ComputeTokenRefreshWaitTime(expiresAtUtc);
+
+            if (waitTime == TimeSpan.MaxValue || waitTime == TimeSpan.Zero)
+            {
+                return false;
+            }
+
+            await Task.Delay(waitTime);
+            return true;
+        }
+
+        static TimeSpan ComputeTokenRefreshWaitTime(DateTime expiresAtUtc)
+        {
+            return expiresAtUtc == DateTime.MaxValue ? TimeSpan.MaxValue : expiresAtUtc.Subtract(RefreshTokenBuffer).Subtract(DateTime.UtcNow);
+        }
 #endif
+    }
 }

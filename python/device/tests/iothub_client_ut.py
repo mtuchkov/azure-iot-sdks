@@ -6,6 +6,7 @@
 
 import sys
 import unittest
+import iothub_client_mock
 from iothub_client_mock import *
 
 # connnection strings for mock testing
@@ -42,44 +43,89 @@ def send_confirmation_callback(message, result, userContext):
 
 class TestExceptionDefinitions(unittest.TestCase):
 
+    def test_IoTHubError(self):
+        error = IoTHubError()
+        self.assertIsInstance(error, BaseException)
+        self.assertIsInstance(error, IoTHubError)
+        with self.assertRaises(BaseException):
+            raise IoTHubError()
+        with self.assertRaises(IoTHubError):
+            raise IoTHubError()
+
     def test_IoTHubMapError(self):
-        with self.assertRaises(Exception):
-            error = IoTHubMapError()
-        with self.assertRaises(Exception):
-            error = IoTHubMapError(__name__)
-        with self.assertRaises(Exception):
-            error = IoTHubMapError(__name__, "function")
-        with self.assertRaises(Exception):
-            error = IoTHubMapError(IoTHubMapResult.ERROR)
-        error = IoTHubMapError("function", IoTHubMapResult.ERROR)
-        with self.assertRaises(TypeError):
-            raise IoTHubMapError("function", IoTHubMapResult.ERROR)
+        error = IoTHubMapError()
+        self.assertIsInstance(error, BaseException)
+        self.assertIsInstance(error, IoTHubError)
+        self.assertIsInstance(error, IoTHubMapError)
+        with self.assertRaises(BaseException):
+            raise IoTHubMapError()
+        with self.assertRaises(IoTHubError):
+            raise IoTHubMapError()
+        with self.assertRaises(IoTHubMapError):
+            raise IoTHubMapError()
 
     def test_IoTHubMessageError(self):
-        with self.assertRaises(Exception):
-            error = IoTHubMessageError()
-        with self.assertRaises(Exception):
-            error = IoTHubMessageError(__name__)
-        with self.assertRaises(Exception):
-            error = IoTHubMessageError(__name__, "function")
-        with self.assertRaises(Exception):
-            error = IoTHubMessageError(IoTHubMapResult.ERROR)
-        error = IoTHubMessageError("function", IoTHubMessageResult.ERROR)
-        with self.assertRaises(TypeError):
-            raise IoTHubMessageError("function", IoTHubMessageResult.ERROR)
+        error = IoTHubMessageError()
+        self.assertIsInstance(error, BaseException)
+        self.assertIsInstance(error, IoTHubError)
+        self.assertIsInstance(error, IoTHubMessageError)
+        with self.assertRaises(BaseException):
+            raise IoTHubMessageError()
+        with self.assertRaises(IoTHubError):
+            raise IoTHubMessageError()
+        with self.assertRaises(IoTHubMessageError):
+            raise IoTHubMessageError()
 
     def test_IoTHubClientError(self):
+        error = IoTHubClientError()
+        self.assertIsInstance(error, BaseException)
+        self.assertIsInstance(error, IoTHubError)
+        self.assertIsInstance(error, IoTHubClientError)
+        with self.assertRaises(BaseException):
+            raise IoTHubClientError()
+        with self.assertRaises(IoTHubError):
+            raise IoTHubClientError()
+        with self.assertRaises(IoTHubClientError):
+            raise IoTHubClientError()
+
+    def test_IoTHubMapErrorArg(self):
         with self.assertRaises(Exception):
-            error = IoTHubClientError()
+            error = IoTHubMapErrorArg()
         with self.assertRaises(Exception):
-            error = IoTHubClientError(__name__)
+            error = IoTHubMapErrorArg(__name__)
         with self.assertRaises(Exception):
-            error = IoTHubClientError(__name__, "function")
+            error = IoTHubMapErrorArg(__name__, "function")
         with self.assertRaises(Exception):
-            error = IoTHubClientError(IoTHubMapResult.ERROR)
-        error = IoTHubClientError("function", IoTHubClientResult.ERROR)
+            error = IoTHubMapErrorArg(IoTHubMapResult.ERROR)
+        error = IoTHubMapErrorArg("function", IoTHubMapResult.ERROR)
         with self.assertRaises(TypeError):
-            raise IoTHubClientError("function", IoTHubClientResult.ERROR)
+            raise IoTHubMapErrorArg("function", IoTHubMapResult.ERROR)
+
+    def test_IoTHubMessageErrorArg(self):
+        with self.assertRaises(Exception):
+            error = IoTHubMessageErrorArg()
+        with self.assertRaises(Exception):
+            error = IoTHubMessageErrorArg(__name__)
+        with self.assertRaises(Exception):
+            error = IoTHubMessageErrorArg(__name__, "function")
+        with self.assertRaises(Exception):
+            error = IoTHubMessageErrorArg(IoTHubMapResult.ERROR)
+        error = IoTHubMessageErrorArg("function", IoTHubMessageResult.ERROR)
+        with self.assertRaises(TypeError):
+            raise IoTHubMessageErrorArg("function", IoTHubMessageResult.ERROR)
+
+    def test_IoTHubClientErrorArg(self):
+        with self.assertRaises(Exception):
+            error = IoTHubClientErrorArg()
+        with self.assertRaises(Exception):
+            error = IoTHubClientErrorArg(__name__)
+        with self.assertRaises(Exception):
+            error = IoTHubClientErrorArg(__name__, "function")
+        with self.assertRaises(Exception):
+            error = IoTHubClientErrorArg(IoTHubMapResult.ERROR)
+        error = IoTHubClientErrorArg("function", IoTHubClientResult.ERROR)
+        with self.assertRaises(TypeError):
+            raise IoTHubClientErrorArg("function", IoTHubClientResult.ERROR)
 
 
 class TestEnumDefinitions(unittest.TestCase):
@@ -299,6 +345,12 @@ class TestClassDefinitions(unittest.TestCase):
         self.assertEqual(callback_value, "value")
         callback_key = ""
         callback_value = ""
+        # check if second filter is refused
+        with self.assertRaises(Exception):
+            map2 = IoTHubMap(map_callback_reject)
+        # clear ok filter
+        map = IoTHubMap()
+        # setup reject filter
         map = IoTHubMap(map_callback_reject)
         with self.assertRaises(IoTHubMapError):
             map.add("key", "value")
@@ -318,7 +370,7 @@ class TestClassDefinitions(unittest.TestCase):
         message = IoTHubMessage(messageString)
         self.assertIsInstance(message, IoTHubMessage)
         # get_bytearray
-        message = IoTHubMessage(bytearray(messageString))
+        message = IoTHubMessage(bytearray(messageString, "utf8"))
         self.assertIsInstance(message, IoTHubMessage)
         with self.assertRaises(AttributeError):
             message.GetByteArray()
@@ -329,7 +381,7 @@ class TestClassDefinitions(unittest.TestCase):
         with self.assertRaises(Exception):
             message.get_bytearray(["key", "value"])
         result = message.get_bytearray()
-        self.assertEqual(result, "myMessage")
+        self.assertEqual(result, b"myMessage")
         # get_string
         message = IoTHubMessage(messageString)
         self.assertIsInstance(message, IoTHubMessage)
@@ -355,7 +407,7 @@ class TestClassDefinitions(unittest.TestCase):
         message = IoTHubMessage(messageString)
         result = message.get_content_type()
         self.assertEqual(result, IoTHubMessageContent.STRING)
-        message = IoTHubMessage(bytearray(messageString))
+        message = IoTHubMessage(bytearray(messageString, "utf8"))
         result = message.get_content_type()
         self.assertEqual(result, IoTHubMessageContent.BYTEARRAY)
         # properties
@@ -516,12 +568,11 @@ class TestClassDefinitions(unittest.TestCase):
         with self.assertRaises(Exception):
             client.set_option(timeout)
         with self.assertRaises(TypeError):
-            client.set_option("timeout", "241000")
+            client.set_option("timeout", bytearray("241000"))
+        result = client.set_option("timeout", "241000")
+        self.assertIsNone(result)
         result = client.set_option("timeout", timeout)
         self.assertIsNone(result)
 
-suite = unittest.TestLoader().loadTestsFromTestCase(TestExceptionDefinitions)
-suite.addTest(unittest.TestLoader().loadTestsFromTestCase(TestEnumDefinitions))
-suite.addTest(unittest.TestLoader().loadTestsFromTestCase(
-    TestClassDefinitions))
-unittest.TextTestRunner(verbosity=3).run(suite)
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

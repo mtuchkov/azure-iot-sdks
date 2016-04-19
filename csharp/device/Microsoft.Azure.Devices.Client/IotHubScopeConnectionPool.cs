@@ -4,11 +4,15 @@
 namespace Microsoft.Azure.Devices.Client
 {
     using System;
-#if !WINDOWS_UWP
+#if !PCL
     sealed class IotHubScopeConnectionPool
     {
         readonly IotHubConnectionCache cache;
+#if WINDOWS_UWP
+        readonly IOThreadTimerSlim idleTimer;
+#else
         readonly IOThreadTimer idleTimer;
+#endif
         readonly TimeSpan idleTimeout;
         readonly object thisLock;
         int referenceCount;
@@ -17,11 +21,16 @@ namespace Microsoft.Azure.Devices.Client
 
         public IotHubScopeConnectionPool(IotHubConnectionCache cache, IotHubConnectionString connectionString, AmqpTransportSettings amqpTransportSettings)
         {
+            Fx.Assert(cache != null, "IotHubConnectionCache reference is null");
             this.cache = cache;
             this.ConnectionString = connectionString;
             this.Connection = new IotHubSingleTokenConnection(this, connectionString,  amqpTransportSettings);
             this.thisLock = new object();
+#if WINDOWS_UWP
+            this.idleTimer = new IOThreadTimerSlim(s => ((IotHubScopeConnectionPool)s).IdleTimerCallback(), this, false);
+#else
             this.idleTimer = new IOThreadTimer(s => ((IotHubScopeConnectionPool)s).IdleTimerCallback(), this, false);
+#endif
             this.idleTimeout = amqpTransportSettings.AmqpConnectionPoolSettings.ConnectionIdleTimeout;
             this.idleTimer.Set(this.idleTimeout);
         }
@@ -58,6 +67,12 @@ namespace Microsoft.Azure.Devices.Client
             }
         }
 
+        // This method is only for unit tests
+        internal int GetCount()
+        {
+            return this.referenceCount;
+        }
+
         void IdleTimerCallback()
         {
             Fx.Assert(this.referenceCount == 0, "Cached IotHubConnection's ref count should be zero when idle timeout occurs!");
@@ -66,4 +81,4 @@ namespace Microsoft.Azure.Devices.Client
         }
     }
 #endif
-}
+        }

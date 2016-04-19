@@ -64,7 +64,7 @@ var runTests = function (DeviceTransport, hubConnStr, deviceConStr, deviceName, 
         } else {
           deviceClient.on('message', function (msg) {
             debug('Received a message with guid: ' + msg.data);
-            if (msg.data === guid) {
+            if (msg.data.toString() === guid) {
               if (!abandonnedOnce) {
                 debug('Abandon the message with guid ' + msg.data);
                 abandonnedOnce = true;
@@ -114,7 +114,7 @@ var runTests = function (DeviceTransport, hubConnStr, deviceConStr, deviceName, 
         } else {
           deviceClient.on('message', function (msg) {
             debug('Received a message with guid: ' + msg.data);
-            if (msg.data === guid) {
+            if (msg.data.toString() === guid) {
               if (!abandonnedOnce) {
                 debug('Abandon the message with guid ' + msg.data);
                 abandonnedOnce = true;
@@ -154,7 +154,7 @@ var runTests = function (DeviceTransport, hubConnStr, deviceConStr, deviceName, 
     });
 
     it('Service sends 5 C2D messages and they are all received by the device', function (done) {
-      this.timeout(60000);
+      this.timeout(120000);
       var deviceMessageCounter = 0;
 
       deviceClient.open(function (openErr) {
@@ -197,20 +197,20 @@ var runTests = function (DeviceTransport, hubConnStr, deviceConStr, deviceName, 
       });
     });
 
-    it('Device sends a message and it is received by the service', function (done) {
-      this.timeout(60000);
-      var guid = uuid.v4();
-      debug('GUID for message: ' + guid);
+    it('Device sends a message of maximum size and it is received by the service', function (done) {
+      this.timeout(120000);
       var startTime = Date.now();
-
+      var bufferSize = 254 * 1024;
+      var buffer = new Buffer(bufferSize);
+      buffer.fill('a');
       deviceClient.open(function (openErr) {
         if (openErr) {
           done(openErr);
         } else {
-          var message = new Message(guid);
+          var message = new Message(buffer);
           deviceClient.sendEvent(message, function (sendErr) {
             assert.isNull(sendErr);
-            debug('Message with guid ' + guid + ' sent at ' + Date.now());
+            debug('Message sent at ' + Date.now());
           });
         }
       });
@@ -227,12 +227,12 @@ var runTests = function (DeviceTransport, hubConnStr, deviceConStr, deviceName, 
                 if ((eventData.SystemProperties['iothub-connection-device-id'] === deviceName) &&
                   (eventData.SystemProperties['x-opt-enqueued-time'] >= startTime - 5000)) {
                   debug('Event received: ' + eventData.Bytes);
-                  if (eventData.Bytes === guid) {
+                  if (eventData.Bytes.length === bufferSize) {
                     receiver.removeAllListeners();
                     ehClient.close();
                     done();
                   } else {
-                    debug('eventData.Bytes: ' + eventData.Bytes + ' doesn\'t match ' + guid);
+                    debug('eventData.Bytes.length: ' + eventData.Bytes.length + ' doesn\'t match bufferSize: ' + bufferSize);
                   }
                 }
               });
@@ -251,7 +251,7 @@ var runTests = function (DeviceTransport, hubConnStr, deviceConStr, deviceName, 
 
   describe('Using a SAS token over ' + DeviceTransport.name + ':', function() {
     it('Device can connect and send a message', function(done) {
-      this.timeout(30000);
+      this.timeout(60000);
       var host = serviceSdk.ConnectionString.parse(hubConnStr).HostName;
       var sas = deviceSas.create(host, deviceName, deviceKey, anHourFromNow()).toString();
       var client = deviceSdk.Client.fromSharedAccessSignature(sas, DeviceTransport);
@@ -280,7 +280,7 @@ var runTests = function (DeviceTransport, hubConnStr, deviceConStr, deviceName, 
     });
 
     it('Service can connect', function(done) {
-      this.timeout(30000);
+      this.timeout(60000);
       var connStr = serviceSdk.ConnectionString.parse(hubConnStr);
       var sas = serviceSas.create(connStr.HostName, connStr.SharedAccessKeyName, connStr.SharedAccessKey, anHourFromNow()).toString();
       var client = serviceSdk.Client.fromSharedAccessSignature(sas);

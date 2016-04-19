@@ -65,7 +65,7 @@ namespace Microsoft.Azure.Devices.Client
     /// </summary>
     public sealed class DeviceClient
 #if !WINDOWS_UWP && !PCL
-       : IDisposable
+        : IDisposable
 #endif
     {
         const string DeviceId = "DeviceId";
@@ -82,7 +82,11 @@ namespace Microsoft.Azure.Devices.Client
 #if !WINDOWS_UWP && !PCL
         DeviceClient(IotHubConnectionString iotHubConnectionString, ITransportSettings[] transportSettings)
         {
-            DeviceStore.Clients.AddOrUpdate(iotHubConnectionString.ToString(), s => new ConcurrentQueue<DeviceClient>(new[] { this }), (s, t) => { t.Enqueue(this); return t; });
+            DeviceStore.Clients.AddOrUpdate(iotHubConnectionString.ToString(), s => new ConcurrentQueue<DeviceClient>(new[] { this }), (s, t) =>
+            {
+                t.Enqueue(this);
+                return t;
+            });
 
             this.TransportHandlerFactory = this.CreateTransportHandler;
             this.innerHandler = new GatekeeperHandler
@@ -127,7 +131,7 @@ namespace Microsoft.Azure.Devices.Client
         /// <returns>DeviceClient</returns>
         public static DeviceClient Create(string hostname, IAuthenticationMethod authenticationMethod)
         {
-#if WINDOWS_UWP
+#if WINDOWS_UWP || PCL
             return Create(hostname, authenticationMethod, TransportType.Http1);
 #else
             return Create(hostname, authenticationMethod, TransportType.Amqp);
@@ -164,7 +168,7 @@ namespace Microsoft.Azure.Devices.Client
         /// <returns>DeviceClient</returns>
         public static DeviceClient CreateFromConnectionString(string connectionString)
         {
-#if WINDOWS_UWP
+#if WINDOWS_UWP || PCL
             return CreateFromConnectionString(connectionString, TransportType.Http1);
 #else
             return CreateFromConnectionString(connectionString, TransportType.Amqp);
@@ -191,6 +195,7 @@ namespace Microsoft.Azure.Devices.Client
 #if WINDOWS_UWP
         [Windows.Foundation.Metadata.DefaultOverloadAttribute()]
 #endif
+
         /// <summary>
         /// Create DeviceClient from the specified connection string using the specified transport type
         /// (PCL) Only Http transport is allowed
@@ -208,11 +213,11 @@ namespace Microsoft.Azure.Devices.Client
             switch (transportType)
             {
                 case TransportType.Amqp:
-#if WINDOWS_UWP || PCL
+#if PCL
                     throw new NotImplementedException("Amqp protocol is not supported");
 #else
                     return CreateFromConnectionString(connectionString, new ITransportSettings[]
-            {
+                    {
                         new AmqpTransportSettings(TransportType.AmqpTcpOnly),
                         new AmqpTransportSettings(TransportType.AmqpWebSocketOnly)
                     });
@@ -225,13 +230,13 @@ namespace Microsoft.Azure.Devices.Client
 #endif
                 case TransportType.AmqpWebSocketOnly:
                 case TransportType.AmqpTcpOnly:
-#if WINDOWS_UWP || PCL
+#if PCL
                     throw new NotImplementedException("Amqp protocol is not supported");
 #else
                     return CreateFromConnectionString(connectionString, new ITransportSettings[] { new AmqpTransportSettings(transportType) });
 #endif
                 case TransportType.Http1:
-#if WINDOWS_UWP || PCL
+#if PCL
                     IotHubConnectionString iotHubConnectionString = IotHubConnectionString.Parse(connectionString);
                     return new DeviceClient(iotHubConnectionString);
 #else
@@ -273,21 +278,21 @@ namespace Microsoft.Azure.Devices.Client
             return CreateFromConnectionString(connectionString + ";" + DeviceId + "=" + deviceId, transportType);
         }
 
-#if !WINDOWS_UWP && !PCL
+#if !PCL
         /// <summary>
         /// Create DeviceClient from the specified connection string using a prioritized list of transports
         /// </summary>
         /// <param name="connectionString">Connection string for the IoT hub (with DeviceId)</param>
         /// <param name="transportSettings">Prioritized list of transports</param>
         /// <returns>DeviceClient</returns>
-        public static DeviceClient CreateFromConnectionString(string connectionString, ITransportSettings[] transportSettings)
+        public static DeviceClient CreateFromConnectionString(string connectionString, [System.Runtime.InteropServices.WindowsRuntime.ReadOnlyArrayAttribute] ITransportSettings[] transportSettings)
         {
             if (connectionString == null)
             {
                 throw new ArgumentNullException(nameof(connectionString));
             }
 
-            if (transportSettings == null) 
+            if (transportSettings == null)
             {
                 throw new ArgumentNullException(nameof(transportSettings));
             }
@@ -316,19 +321,25 @@ namespace Microsoft.Azure.Devices.Client
                             throw new InvalidOperationException("Unknown implementation of ITransportSettings type");
                         }
                         break;
+#if !WINDOWS_UWP
                     case TransportType.Mqtt:
                         if (!(transportSetting is MqttTransportSettings))
                         {
                             throw new InvalidOperationException("Unknown implementation of ITransportSettings type");
                         }
                         break;
+#endif
                     default:
                         throw new InvalidOperationException("Unsupported Transport Type {0}".FormatInvariant(transportSetting.GetTransportType()));
                 }
             }
 
+#if !WINDOWS_UWP
             // Defer concrete DeviceClient creation to OpenAsync
             return new DeviceClient(iotHubConnectionString, transportSettings);
+#else
+            return new DeviceClient(iotHubConnectionString);
+#endif
         }
 
         /// <summary>
@@ -338,7 +349,10 @@ namespace Microsoft.Azure.Devices.Client
         /// <param name="deviceId">Id of the device</param>
         /// <param name="transportSettings">Prioritized list of transportTypes</param>
         /// <returns>DeviceClient</returns>
-        public static DeviceClient CreateFromConnectionString(string connectionString, string deviceId, ITransportSettings[] transportSettings)
+#if WINDOWS_UWP
+        [Windows.Foundation.Metadata.DefaultOverloadAttribute]
+#endif
+        public static DeviceClient CreateFromConnectionString(string connectionString, string deviceId, [System.Runtime.InteropServices.WindowsRuntime.ReadOnlyArrayAttribute] ITransportSettings[] transportSettings)
         {
             if (connectionString == null)
             {
@@ -359,9 +373,9 @@ namespace Microsoft.Azure.Devices.Client
         }
 #endif
 
-        /// <summary>
-        /// Explicitly open the DeviceClient instance.
-        /// </summary>
+            /// <summary>
+            /// Explicitly open the DeviceClient instance.
+            /// </summary>
         public AsyncTask OpenAsync()
         {
             return this.innerHandler.OpenAsync(true).AsTaskOrAsyncOp();
@@ -397,6 +411,7 @@ namespace Microsoft.Azure.Devices.Client
 #if WINDOWS_UWP
         [Windows.Foundation.Metadata.DefaultOverloadAttribute()]
 #endif
+
         /// <summary>
         /// Deletes a received message from the device queue
         /// </summary>
@@ -428,6 +443,7 @@ namespace Microsoft.Azure.Devices.Client
 #if WINDOWS_UWP
         [Windows.Foundation.Metadata.DefaultOverloadAttribute()]
 #endif
+
         /// <summary>
         /// Puts a received message back onto the device queue
         /// </summary>
@@ -459,6 +475,7 @@ namespace Microsoft.Azure.Devices.Client
 #if WINDOWS_UWP
         [Windows.Foundation.Metadata.DefaultOverloadAttribute()]
 #endif
+
         /// <summary>
         /// Deletes a received message from the device queue and indicates to the server that the message could not be processed.
         /// </summary>
@@ -515,12 +532,9 @@ namespace Microsoft.Azure.Devices.Client
             return this.innerHandler.SendEventAsync(messages).AsTaskOrAsyncOp();
         }
 
-#if !WINDOWS_UWP && !PCL
-        
         public void Dispose()
         {
             this.innerHandler?.Dispose();
         }
-#endif
     }
 }
