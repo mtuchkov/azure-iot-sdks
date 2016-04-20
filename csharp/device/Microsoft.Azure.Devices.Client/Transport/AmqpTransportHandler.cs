@@ -33,10 +33,10 @@ namespace Microsoft.Azure.Devices.Client.Transport
             this.deviceId = connectionString.DeviceId;
             switch (transportType)
             {
-                case TransportType.AmqpTcpOnly:
+                case TransportType.Amqp_Tcp_Only:
                     this.IotHubConnection = TcpConnectionCache.GetConnection(connectionString, transportSettings);
                     break;
-                case TransportType.AmqpWebSocketOnly:
+                case TransportType.Amqp_WebSocket_Only:
                     this.IotHubConnection = WsConnectionCache.GetConnection(connectionString, transportSettings);
                     break;
                 default:
@@ -86,12 +86,8 @@ namespace Microsoft.Azure.Devices.Client.Transport
             }
 
             IotHubConnectionString iotHubConnectionString = IotHubConnectionString.Parse(connectionString);
-            return new AmqpTransportHandler(iotHubConnectionString, new AmqpTransportSettings(TransportType.AmqpTcpOnly));
+            return new AmqpTransportHandler(iotHubConnectionString, new AmqpTransportSettings(TransportType.Amqp_Tcp_Only));
         }
-
-        public TimeSpan OpenTimeout { get; }
-
-        public TimeSpan OperationTimeout { get; }
 
         public IotHubConnection IotHubConnection { get; }
 
@@ -169,8 +165,9 @@ namespace Microsoft.Azure.Devices.Client.Transport
             }
         }
 
-        public override void Dispose(bool disposing)
+        protected override void Dispose(bool disposing)
         {
+            base.Dispose(disposing);
             if (disposing)
             {
                 this.faultTolerantDeviceBoundReceivingLink?.Dispose();

@@ -8,24 +8,18 @@ namespace Microsoft.Azure.Devices.Client
     using System.Threading.Tasks;
     using Microsoft.Azure.Devices.Client.Common;
 
-    abstract class DeviceClientDelegatingHandler : IDelegatingHandler
+    abstract class DefaultDelegatingHandler : IDelegatingHandler
     {
         static readonly Task<Message> DummyResultObject = Task.FromResult((Message)null);
 
-        protected volatile IDelegatingHandler innerHandler;
+        public IDelegatingHandler InnerHandler { get; set; }
 
-        public IDelegatingHandler InnerHandler
-        {
-            get { return this.innerHandler; }
-            set { this.innerHandler = value; }
-        }
-
-        protected DeviceClientDelegatingHandler()
+        protected DefaultDelegatingHandler()
             : this(null)
         {
         }
 
-        protected DeviceClientDelegatingHandler(DeviceClientDelegatingHandler innerHandler)
+        protected DefaultDelegatingHandler(DefaultDelegatingHandler innerHandler)
         {
             this.InnerHandler = innerHandler;
         }
@@ -75,7 +69,7 @@ namespace Microsoft.Azure.Devices.Client
             return this.InnerHandler == null ? TaskConstants.Completed : this.InnerHandler.SendEventAsync(messages);
         }
 
-        public virtual void Dispose(bool disposing)
+        protected virtual void Dispose(bool disposing)
         {
             
         }
@@ -86,7 +80,7 @@ namespace Microsoft.Azure.Devices.Client
             GC.SuppressFinalize(this);
         }
 
-        ~DeviceClientDelegatingHandler()
+        ~DefaultDelegatingHandler()
         {
             this.Dispose(false);
         }

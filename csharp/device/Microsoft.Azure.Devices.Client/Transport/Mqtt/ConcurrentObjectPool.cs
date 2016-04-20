@@ -6,6 +6,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using System;
     using System.Collections.Generic;
     using System.Linq;
+    using System.Threading;
     using System.Threading.Tasks;
     using Microsoft.Azure.Devices.Client.Extensions;
 
@@ -13,43 +14,20 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     {
         class Entry
         {
-            readonly IEqualityComparer<TKey> comparer;
-
             public TKey Key { get; }
 
             public int RefCount { get; set; }
 
-            public Entry(TKey key, int refCount, IEqualityComparer<TKey> comparer)
+            public Entry(TKey key, int refCount)
             {
-                this.comparer = comparer;
                 this.Key = key;
                 this.RefCount = refCount;
-            }
-
-            public override bool Equals(object obj)
-            {
-                var other = obj as Entry;
-                if (other == null)
-                {
-                    return false;
-                }
-                IEqualityComparer<TKey> equalityComparer = this.comparer ?? EqualityComparer<TKey>.Default;
-                return equalityComparer.Equals(this.Key, other.Key);
-            }
-
-            public override int GetHashCode()
-            {
-                unchecked
-                {
-                    IEqualityComparer<TKey> equalityComparer = this.comparer ?? EqualityComparer<TKey>.Default;
-                    return equalityComparer.GetHashCode(this.Key) * 397;
-                }
             }
         }
 
         class Slot
         {
-            public List<Entry> Entries { get; set; }
+            public Dictionary<TKey, Entry> Entries { get; set; }
 
             public DateTime LastUpdatedTime { get; set; }
 
@@ -65,6 +43,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         int position;
         readonly object syncRoot = new object();
+        Timer cleanupTimer;
 
         public ConcurrentObjectPool(int poolSize, Func<TValue> objectFactory, TimeSpan keepAliveTimeout, Func<TValue, Task> disposeCallback)
             : this(poolSize, objectFactory, keepAliveTimeout, disposeCallback, null)
@@ -83,16 +62,17 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 this.slots[i] = new Slot
                 {
-                    Entries = new List<Entry>()
+                    Entries = new Dictionary<TKey, Entry>(this.keyComparer)
                 };
             }
+            this.cleanupTimer = new Timer(this.Cleanup, null, this.keepAliveTimeout, this.keepAliveTimeout);
         }
 
         public TValue TakeOrAdd(TKey key)
         {
             lock (this.syncRoot)
             {
-                Slot slot = this.slots.FirstOrDefault(s => s.Entries.Any(x => this.IsKeyPresent(x, key)));
+                Slot slot = this.slots.FirstOrDefault(s => s.Entries.ContainsKey(key));
                 TValue value;
 
                 if (slot == null)
@@ -103,12 +83,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                         slot.Value = this.objectFactory();
                     }
                     value = slot.Value;
-                    slot.Entries.Add(new Entry(key, 1, this.keyComparer));
+                    slot.Entries.Add(key, new Entry(key, 1));
                     slot.LastUpdatedTime = DateTime.UtcNow;
                 }
                 else
                 {
-                    Entry entry = slot.Entries.First(x => this.IsKeyPresent(x, key));
+                    Entry entry = slot.Entries[key];
                     entry.RefCount++;
                     slot.LastUpdatedTime = DateTime.UtcNow;
                     value = slot.Value;
@@ -121,22 +101,17 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             lock (this.syncRoot)
             {
-                for (int i = 0; i < this.slots.Length; i++)
+                foreach (Slot slot in this.slots)
                 {
-                    Slot slot = this.slots[i];
-                    Entry entry = slot.Entries.FirstOrDefault(x => this.IsKeyPresent(x, key));
-                    if (entry == null)
+                    Entry entry; 
+                    if (!slot.Entries.TryGetValue(key, out entry) || entry == null)
                     {
                         continue;
                     }
                     entry.RefCount--;
                     if (entry.RefCount == 0)
                     {
-                        slot.Entries.Remove(entry);
-                        if (slot.Entries.Count == 0)
-                        {
-                            this.ScheduleCleanup(slot, i);
-                        }
+                        slot.Entries.Remove(key);
                     }
                     break;
                 }
@@ -144,32 +119,35 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             return true;
         }
 
-        async void ScheduleCleanup(Slot key, int index)
+        void Cleanup(object state)
         {
-            try
+            var objectsToCleanup = new List<TValue>();
+            lock (this.syncRoot)
             {
-                await Task.Delay(this.keepAliveTimeout);
-                await this.DisposeAsync(key, index);
+                for (int i = 0; i < poolSize; i++)
+                {
+                    Slot slot = this.slots[i];
+                    if (slot.Entries.Count == 0 && slot.LastUpdatedTime < DateTime.UtcNow - this.keepAliveTimeout)
+                    {
+                        objectsToCleanup.Add(slot.Value);
+                        this.slots[i] = null;
+                    }
+                }
             }
-            catch (Exception ex) when (!ex.IsFatal())
+            foreach (TValue obj in objectsToCleanup)
             {
+                this.ScheduleDispose(obj);
             }
         }
 
-        async Task DisposeAsync(Slot slot, int index)
+        async void ScheduleDispose(TValue obj)
         {
-            TValue value = null;
-            lock (this.syncRoot)
+            try
             {
-                if (this.slots[index] != null && this.slots[index] == slot && slot.Entries.Count == 0 && slot.LastUpdatedTime + this.keepAliveTimeout <= DateTime.UtcNow)
-                {
-                    value = slot.Value;
-                    this.slots[index] = null;
-                }
+                await this.disposeCallback(obj);
             }
-            if (value != null)
+            catch (Exception ex) when (!ex.IsFatal())
             {
-                await this.disposeCallback(value);
             }
         }
 

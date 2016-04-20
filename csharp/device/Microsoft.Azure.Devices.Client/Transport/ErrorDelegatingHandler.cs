@@ -18,15 +18,15 @@ namespace Microsoft.Azure.Devices.Client.Transport
     // Copyright (c) Microsoft. All rights reserved.
     // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-    sealed class ErrorHandler : DeviceClientDelegatingHandler
+    sealed class ErrorDelegatingHandler : DefaultDelegatingHandler
     {
-        readonly Func<DeviceClientDelegatingHandler> handlerFactory;
+        readonly Func<DefaultDelegatingHandler> handlerFactory;
 
         volatile TaskCompletionSource openCompletion;
         internal volatile Exception fatalException;
         internal int resetCounter;
 
-        public ErrorHandler(Func<DeviceClientDelegatingHandler> handlerFactory)
+        public ErrorDelegatingHandler(Func<DefaultDelegatingHandler> handlerFactory)
         {
             this.handlerFactory = handlerFactory;
         }
@@ -37,24 +37,41 @@ namespace Microsoft.Azure.Devices.Client.Transport
             {
                 throw this.fatalException;
             }
-            if (this.openCompletion == null)
+            TaskCompletionSource openPromise = this.openCompletion;
+            if (openPromise == null)
             {
+                openPromise = new TaskCompletionSource();
 #pragma warning disable 420 //Reference to volitile variable will not be treated as volatile which is not quite true in this case.
-                if (Interlocked.CompareExchange(ref this.openCompletion, new TaskCompletionSource(), null) == null)
+                TaskCompletionSource currentOpenPromise;
+                if ((currentOpenPromise = Interlocked.CompareExchange(ref this.openCompletion, openPromise, null)) == null)
 #pragma warning restore 420
                 {
                     this.InnerHandler = this.handlerFactory();
-                    await base.OpenAsync(explicitOpen);
-                    this.openCompletion.TryComplete();
+                    try
+                    {
+                        await this.ExecuteWithErrorHandlingAsync(() => base.OpenAsync(explicitOpen));
+                        openPromise.TryComplete();
+                    }
+                    catch (Exception ex) when (!ex.IsFatal())
+                    {
+                        openPromise.TrySetException(ex);
+                        throw;
+                    }
                 }
-                await this.openCompletion.Task;
+                else
+                {
+                    await currentOpenPromise.Task;
+                }
             }
-            await this.openCompletion.Task;
+            else
+            {
+                await openPromise.Task;
+            }
         }
 
         public override Task<Message> ReceiveAsync()
         {
-            return this.ExecuteWithErrorHandlingAsync(()=> base.ReceiveAsync());
+            return this.ExecuteWithErrorHandlingAsync(() => base.ReceiveAsync());
         }
 
         public override Task<Message> ReceiveAsync(TimeSpan timeout)
@@ -98,7 +115,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
             {
                 return await asyncOperation();
             }
-            catch(Exception ex) when (!ex.IsFatal())
+            catch (Exception ex) when (!ex.IsFatal())
             {
                 if (this.IsTransient(ex))
                 {
@@ -159,16 +176,15 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
         bool IsTransportWorking(Exception exception)
         {
-            bool? isTransportWorking = exception.Unwind<IotHubException>().FirstOrDefault()?.Unwind<InvalidOperationException>().Any();
-            return isTransportWorking.HasValue && isTransportWorking.Value;
+            return exception.Unwind<IotHubClientTransientException>().Any();
         }
 
         bool IsTransient(Exception exception)
         {
             IEnumerable<IotHubException> iotHubExceptions = exception.Unwind<IotHubException>();
-            bool hasUnauthorized = iotHubExceptions.Any(x=>x.Unwind<UnauthorizedException>().Any());
-            
-            return !hasUnauthorized && (iotHubExceptions.Any() || exception.Unwind<IOException>().Any() || exception.Unwind<ObjectDisposedException>().Any()  || exception.Unwind<OperationCanceledException>().Any() 
+            bool hasUnauthorized = iotHubExceptions.Any(x => x.Unwind<UnauthorizedException>().Any());
+
+            return !hasUnauthorized && (iotHubExceptions.Any() || exception.Unwind<IOException>().Any() || exception.Unwind<TimeoutException>().Any() || exception.Unwind<ObjectDisposedException>().Any() || exception.Unwind<OperationCanceledException>().Any()
 #if !PCL && !WINDOWS_UWP
                 || exception.Unwind<System.Net.Sockets.SocketException>().Any()
 #endif
@@ -183,7 +199,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
                 if (Interlocked.CompareExchange(ref this.openCompletion, null, completion) == completion)
 #pragma warning restore 420
                 {
-                    if (handler == this.innerHandler)
+                    if (handler == this.InnerHandler)
                     {
                         this.Cleanup(handler);
                     }

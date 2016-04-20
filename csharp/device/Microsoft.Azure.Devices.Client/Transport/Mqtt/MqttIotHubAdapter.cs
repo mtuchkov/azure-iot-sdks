@@ -303,7 +303,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        async Task ProcessConnectAck(IChannelHandlerContext context, ConnAckPacket packet)
+        async Task ProcessConnectAckAsync(IChannelHandlerContext context, ConnAckPacket packet)
         {
             if (packet.ReturnCode != ConnectReturnCode.Accepted)
             {
@@ -379,7 +379,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 switch (packet.PacketType)
                 {
                     case PacketType.CONNACK:
-                        await this.ProcessConnectAck(context, (ConnAckPacket)packet);
+                        await this.ProcessConnectAckAsync(context, (ConnAckPacket)packet);
                         break;
                     case PacketType.SUBACK:
                         this.ProcessSubAck();

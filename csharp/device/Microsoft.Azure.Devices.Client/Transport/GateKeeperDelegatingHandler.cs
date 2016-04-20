@@ -13,14 +13,14 @@ namespace Microsoft.Azure.Devices.Client.Transport
     /// <summary>
     /// Contains the implementation of methods that a device can use to send messages to and receive from the service.
     /// </summary>
-    sealed class GatekeeperHandler : DeviceClientDelegatingHandler
+    sealed class GateKeeperDelegatingHandler : DefaultDelegatingHandler
     {
         internal bool OpenCalled;
         internal bool CloseCalled;
         volatile TaskCompletionSource<object> openTaskCompletionSource;
         readonly object thisLock;
 
-        public GatekeeperHandler()
+        public GateKeeperDelegatingHandler()
         {
             this.thisLock = new object();
             this.openTaskCompletionSource = new TaskCompletionSource<object>(this);

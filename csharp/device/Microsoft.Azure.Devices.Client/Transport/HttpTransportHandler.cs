@@ -162,8 +162,9 @@ namespace Microsoft.Azure.Devices.Client.Transport
                 CancellationToken.None);
         }
 
-        public override void Dispose(bool disposing)
+        protected override void Dispose(bool disposing)
         {
+            base.Dispose(disposing);
             if (disposing)
             {
                 this.httpClientHelper?.Dispose();

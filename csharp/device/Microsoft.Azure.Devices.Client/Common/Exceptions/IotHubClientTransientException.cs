@@ -8,23 +8,13 @@ namespace Microsoft.Azure.Devices.Client.Exceptions
 
     class IotHubClientTransientException : IotHubClientException
     {
-        public IotHubClientTransientException(string message)
-            : base(message)
-        {
-        }
-
         public IotHubClientTransientException(string message, string trackingId)
-            : base(message, trackingId)
+            : base(message, true, trackingId)
         {
         }
 
-        public IotHubClientTransientException(string message, bool isTransient, string trackingId)
-            : base(message, isTransient, trackingId)
-        {
-        }
-
-        public IotHubClientTransientException(string message, bool isTransient)
-            : base(message, isTransient)
+        public IotHubClientTransientException(string message)
+            : base(message, true)
         {
         }
 
@@ -34,17 +24,12 @@ namespace Microsoft.Azure.Devices.Client.Exceptions
         }
 
         public IotHubClientTransientException(string message, Exception innerException)
-            : base(message, innerException)
+            : base(message, innerException, true)
         {
         }
 
-        public IotHubClientTransientException(string message, Exception innerException, bool isTransient)
-            : base(message, innerException, isTransient)
-        {
-        }
-
-        public IotHubClientTransientException(string message, Exception innerException, bool isTransient, string trackingId)
-            : base(message, innerException, isTransient, trackingId)
+        public IotHubClientTransientException(string message, Exception innerException, string trackingId)
+            : base(message, innerException, true, trackingId)
         {
         }
 

@@ -5,7 +5,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
 {
     using System.Threading.Tasks;
 
-    abstract class TransportHandler : DeviceClientDelegatingHandler
+    abstract class TransportHandler : DefaultDelegatingHandler
     {
         readonly ITransportSettings transportSettings;
 

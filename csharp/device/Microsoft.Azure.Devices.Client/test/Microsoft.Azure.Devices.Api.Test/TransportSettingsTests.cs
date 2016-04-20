@@ -35,7 +35,7 @@ namespace Microsoft.Azure.Devices.Client.Test
         public void TransportSettingsTest_TransportType_AmqpTcp_Prefetch_0()
         {
             var amqpConnectionPoolSettings = new AmqpConnectionPoolSettings();
-            var transportSetting = new AmqpTransportSettings(TransportType.AmqpTcpOnly, 0, amqpConnectionPoolSettings);
+            var transportSetting = new AmqpTransportSettings(TransportType.Amqp_Tcp_Only, 0, amqpConnectionPoolSettings);
         }
 
         [TestMethod]
@@ -43,8 +43,8 @@ namespace Microsoft.Azure.Devices.Client.Test
         [TestCategory("TransportSettings")]
         public void TransportSettingsTest_TransportType_Amqp_WebSocket()
         {
-            var transportSetting = new AmqpTransportSettings(TransportType.AmqpWebSocketOnly);
-            Assert.IsTrue(transportSetting.GetTransportType() == TransportType.AmqpWebSocketOnly, "Should be TransportType.Amqp_WebSocket_Only");
+            var transportSetting = new AmqpTransportSettings(TransportType.Amqp_WebSocket_Only);
+            Assert.IsTrue(transportSetting.GetTransportType() == TransportType.Amqp_WebSocket_Only, "Should be TransportType.Amqp_WebSocket_Only");
             Assert.IsTrue(transportSetting.PrefetchCount == 50, "Should be default value of 50");
         }
 
@@ -54,8 +54,8 @@ namespace Microsoft.Azure.Devices.Client.Test
         public void TransportSettingsTest_TransportType_Amqp_WebSocket_Tcp()
         {
             var amqpConnectionPoolSettings = new AmqpConnectionPoolSettings();
-            var transportSetting = new AmqpTransportSettings(TransportType.AmqpTcpOnly, 200, amqpConnectionPoolSettings);
-            Assert.IsTrue(transportSetting.GetTransportType() == TransportType.AmqpTcpOnly, "Should be TransportType.Amqp_Tcp_Only");
+            var transportSetting = new AmqpTransportSettings(TransportType.Amqp_Tcp_Only, 200, amqpConnectionPoolSettings);
+            Assert.IsTrue(transportSetting.GetTransportType() == TransportType.Amqp_Tcp_Only, "Should be TransportType.Amqp_Tcp_Only");
             Assert.IsTrue(transportSetting.PrefetchCount == 200, "Should be value of 200");
         }
 
@@ -96,7 +96,7 @@ namespace Microsoft.Azure.Devices.Client.Test
         public void TransportSettingsTest_Timeouts()
         {
             var amqpConnectionPoolSettings = new AmqpConnectionPoolSettings();
-            var transportSetting = new AmqpTransportSettings(TransportType.AmqpWebSocketOnly, 200, amqpConnectionPoolSettings);
+            var transportSetting = new AmqpTransportSettings(TransportType.Amqp_WebSocket_Only, 200, amqpConnectionPoolSettings);
             transportSetting.OpenTimeout = TimeSpan.FromMinutes(5);
             transportSetting.OperationTimeout = TimeSpan.FromMinutes(10);
             Assert.IsTrue(transportSetting.OpenTimeout == TimeSpan.FromMinutes(5), "OpenTimeout not set correctly");
@@ -132,7 +132,7 @@ namespace Microsoft.Azure.Devices.Client.Test
         {
             var connectionPoolSettings = new AmqpConnectionPoolSettings();
             connectionPoolSettings.MaxPoolSize = ushort.MaxValue;
-            var transportSetting = new AmqpTransportSettings(TransportType.AmqpTcpOnly, 200, connectionPoolSettings);
+            var transportSetting = new AmqpTransportSettings(TransportType.Amqp_Tcp_Only, 200, connectionPoolSettings);
             Assert.IsTrue(transportSetting.AmqpConnectionPoolSettings.MaxPoolSize == ushort.MaxValue, "MaxPoolSize should be 64K");
         }
 
@@ -143,7 +143,7 @@ namespace Microsoft.Azure.Devices.Client.Test
         {
             var connectionPoolSettings = new AmqpConnectionPoolSettings();
             connectionPoolSettings.Pooling = false;
-            var transportSetting = new AmqpTransportSettings(TransportType.AmqpTcpOnly, 200, connectionPoolSettings);
+            var transportSetting = new AmqpTransportSettings(TransportType.Amqp_Tcp_Only, 200, connectionPoolSettings);
             Assert.IsTrue(transportSetting.AmqpConnectionPoolSettings.Pooling == false, "Pooling should be off");
         }
     }

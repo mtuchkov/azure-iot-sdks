@@ -6,7 +6,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using System;
     using System.Collections.Concurrent;
     using System.Collections.Generic;
-    using System.Linq;
     using System.Net;
     using System.Threading;
     using System.Threading.Tasks;
@@ -39,7 +38,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             Error = 64
         }
 
-        static readonly string generationId = Guid.NewGuid().ToString();
+        static readonly string GenerationId = Guid.NewGuid().ToString();
         static readonly ConcurrentObjectPool<string, IEventLoopGroup> EventLoopGroupPool =
             new ConcurrentObjectPool<string, IEventLoopGroup>(
                 Environment.ProcessorCount, 
@@ -49,13 +48,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         
         readonly IPAddress serverAddress;
         readonly Func<IPAddress, int, Task<IChannel>> channelFactory;
-        readonly ConcurrentQueue<string> completionQueue;
+        readonly Queue<string> completionQueue;
         readonly MqttIotHubAdapterFactory mqttIotHubAdapterFactory;
         readonly QualityOfService qos;
 
         readonly string eventLoopGroupKey;
         readonly object syncRoot = new object();
-        readonly ConcurrentSpinWait receiveContentionSpinWait = new ConcurrentSpinWait();
         readonly CancellationTokenSource disconnectAwaitersCancellationSource = new CancellationTokenSource();
         readonly RetryPolicy closeRetryPolicy;
 
@@ -87,7 +85,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             this.mqttIotHubAdapterFactory = new MqttIotHubAdapterFactory(settings);
             this.messageQueue = new ConcurrentQueue<Message>();
-            this.completionQueue = new ConcurrentQueue<string>();
+            this.completionQueue = new Queue<string>();
             this.serverAddress = Dns.GetHostEntry(iotHubConnectionString.HostName).AddressList[0];
             this.qos = settings.PublishToServerQoS;
             this.eventLoopGroupKey = iotHubConnectionString.IotHubName + "#" + iotHubConnectionString.DeviceId + "#" + iotHubConnectionString.Audience;
@@ -181,7 +179,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 if (this.messageQueue.TryDequeue(out message))
                 {
-                    message.LockToken = generationId + message.LockToken;
+                    message.LockToken = GenerationId + message.LockToken;
                     if (this.qos == QualityOfService.AtLeastOnce)
                     {
                         this.completionQueue.Enqueue(message.LockToken);
@@ -204,12 +202,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 throw new IotHubClientException(new InvalidOperationException("Complete is not allowed for QoS 0."));
             }
 
-            bool raceCondition = false;
-            Task completeOperationCompletion = null;
-            string expectedLockToken;
+            Task completeOperationCompletion;
             lock (this.syncRoot)
             {
-                if (!lockToken.StartsWith(generationId))
+                if (!lockToken.StartsWith(GenerationId))
                 {
                     throw new IotHubClientException(new InvalidOperationException("Lock token is stale or never existed."));
                 }
@@ -217,31 +213,24 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 {
                     throw new IotHubClientException(new InvalidOperationException("Unknown lock token."));
                 }
-                if (!this.completionQueue.TryPeek(out expectedLockToken) || expectedLockToken != lockToken ||
-                    !this.completionQueue.TryDequeue(out expectedLockToken) || expectedLockToken != lockToken)
+                string expectedLockToken = this.completionQueue.Peek();
+                if (expectedLockToken == lockToken)
                 {
-                    //exception will raise and spin will happen, so there is no a big performance penalty to try to find the token and tell to user what has happened
-                    raceCondition = this.completionQueue.All(t => t != lockToken);
+                    this.completionQueue.Dequeue();
+                    completeOperationCompletion = this.channel.WriteAndFlushAsync(lockToken);
                 }
                 else
                 {
-                    completeOperationCompletion = this.channel.WriteAndFlushAsync(lockToken);
+                    throw new IotHubClientTransientException(new InvalidOperationException($"Client MUST send PUBACK packets in the order in which the corresponding PUBLISH packets were received (QoS 1 messages) per [MQTT-4.6.0-2]. Expected lock token: '{expectedLockToken}'; actual lock token: '{lockToken}'."));
                 }
             }
-            if (raceCondition)
-            {
-                //We spin here to reduce contention and process the message that is on top of the queue first.
-                this.receiveContentionSpinWait.SpinOnce();
-                throw new IotHubClientTransientException(new InvalidOperationException($"Client MUST send PUBACK packets in the order in which the corresponding PUBLISH packets were received (QoS 1 messages) per [MQTT-4.6.0-2]. Expected lock token: '{expectedLockToken}'; actual lock token: '{lockToken}'."));
-            }
-            else if (completeOperationCompletion == null)
+            if (completeOperationCompletion == null)
             {
                 //Token is not found. It is either a garbage or token from previous session in any case we should not fail the channel - user should decide what to do
                 throw new IotHubClientException("LockToken is not found. It is either not exist or this is a token from previous session. Do not retry operation");
             }
             else
             {
-                this.receiveContentionSpinWait.Reset();
                 await completeOperationCompletion;
             }
         }
@@ -256,8 +245,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             throw new IotHubClientException(new NotSupportedException("MQTT protocol does not support this operation"));
         }
 
-        public override void Dispose(bool disposing)
+        protected override void Dispose(bool disposing)
         {
+            base.Dispose(disposing);
             if (disposing)
             {
                 if (this.TryStop())
@@ -340,12 +330,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        TransportState MoveToStateIfPossible(TransportState destination, TransportState illigalStates)
+        TransportState MoveToStateIfPossible(TransportState destination, TransportState illegalStates)
         {
             TransportState previousState = this.State;
             do
             {
-                if ((previousState & illigalStates) > 0)
+                if ((previousState & illegalStates) > 0)
                 {
                     return destination;
                 }

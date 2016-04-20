@@ -10,9 +10,9 @@ namespace Microsoft.Azure.Devices.Client.Transport
     using System.Threading.Tasks;
     using Microsoft.Azure.Devices.Client.Exceptions;
 
-    class RoutingHandler : DeviceClientDelegatingHandler
+    class RoutingHandler : DefaultDelegatingHandler
     {
-        internal delegate DeviceClientDelegatingHandler TransportHandlerFactory(IotHubConnectionString iotHubConnectionString, ITransportSettings transportSettings);
+        internal delegate DefaultDelegatingHandler TransportHandlerFactory(IotHubConnectionString iotHubConnectionString, ITransportSettings transportSettings);
 
         readonly TransportHandlerFactory transportHandlerFactory;
         readonly IotHubConnectionString iotHubConnectionString;

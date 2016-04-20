@@ -47,12 +47,12 @@ namespace Microsoft.Azure.Devices.Client
         /// <summary>
         /// Advanced Message Queuing Protocol transport over WebSocket only.
         /// </summary>
-        AmqpWebSocketOnly = 2,
+        Amqp_WebSocket_Only = 2,
 
         /// <summary>
         /// Advanced Message Queuing Protocol transport over native TCP only
         /// </summary>
-        AmqpTcpOnly = 3,
+        Amqp_Tcp_Only = 3,
 
         /// <summary>
         /// Message Queuing Telemetry Transport.
@@ -88,21 +88,18 @@ namespace Microsoft.Azure.Devices.Client
                 return t;
             });
 
-            this.TransportHandlerFactory = this.CreateTransportHandler;
-            this.innerHandler = new GatekeeperHandler
+            this.innerHandler = new GateKeeperDelegatingHandler
             {
-                InnerHandler = new ErrorHandler(() => new RoutingHandler(this.TransportHandlerFactory, iotHubConnectionString, transportSettings))
+                InnerHandler = new ErrorDelegatingHandler(() => new RoutingHandler(this.CreateTransportHandler, iotHubConnectionString, transportSettings))
             };
         }
 
-        internal RoutingHandler.TransportHandlerFactory TransportHandlerFactory { get; set; }
-
-        DeviceClientDelegatingHandler CreateTransportHandler(IotHubConnectionString iotHubConnectionString, ITransportSettings transportSetting)
+        DefaultDelegatingHandler CreateTransportHandler(IotHubConnectionString iotHubConnectionString, ITransportSettings transportSetting)
         {
             switch (transportSetting.GetTransportType())
             {
-                case TransportType.AmqpWebSocketOnly:
-                case TransportType.AmqpTcpOnly:
+                case TransportType.Amqp_WebSocket_Only:
+                case TransportType.Amqp_Tcp_Only:
                     return new AmqpTransportHandler(iotHubConnectionString, transportSetting as AmqpTransportSettings);
                 case TransportType.Http1:
                     return new HttpTransportHandler(iotHubConnectionString, transportSetting as Http1TransportSettings);
@@ -118,7 +115,7 @@ namespace Microsoft.Azure.Devices.Client
         {
             this.innerHandler = new GatekeeperHandler
             {
-                InnerHandler = new ErrorHandler(()=> new HttpTransportHandler(iotHubConnectionString))
+                InnerHandler = new ErrorDelegatingHandler(()=> new HttpTransportHandler(iotHubConnectionString))
             };
         }
 #endif
@@ -218,8 +215,8 @@ namespace Microsoft.Azure.Devices.Client
 #else
                     return CreateFromConnectionString(connectionString, new ITransportSettings[]
                     {
-                        new AmqpTransportSettings(TransportType.AmqpTcpOnly),
-                        new AmqpTransportSettings(TransportType.AmqpWebSocketOnly)
+                        new AmqpTransportSettings(TransportType.Amqp_Tcp_Only),
+                        new AmqpTransportSettings(TransportType.Amqp_WebSocket_Only)
                     });
 #endif
                 case TransportType.Mqtt:
@@ -228,8 +225,8 @@ namespace Microsoft.Azure.Devices.Client
 #else
                     return CreateFromConnectionString(connectionString, new ITransportSettings[] { new MqttTransportSettings(transportType) });
 #endif
-                case TransportType.AmqpWebSocketOnly:
-                case TransportType.AmqpTcpOnly:
+                case TransportType.Amqp_WebSocket_Only:
+                case TransportType.Amqp_Tcp_Only:
 #if PCL
                     throw new NotImplementedException("Amqp protocol is not supported");
 #else
@@ -308,8 +305,8 @@ namespace Microsoft.Azure.Devices.Client
             {
                 switch (transportSetting.GetTransportType())
                 {
-                    case TransportType.AmqpWebSocketOnly:
-                    case TransportType.AmqpTcpOnly:
+                    case TransportType.Amqp_WebSocket_Only:
+                    case TransportType.Amqp_Tcp_Only:
                         if (!(transportSetting is AmqpTransportSettings))
                         {
                             throw new InvalidOperationException("Unknown implementation of ITransportSettings type");

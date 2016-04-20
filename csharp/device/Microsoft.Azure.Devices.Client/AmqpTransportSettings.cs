@@ -39,8 +39,8 @@ namespace Microsoft.Azure.Devices.Client
 
             switch (transportType)
             {
-                case TransportType.AmqpWebSocketOnly:
-                case TransportType.AmqpTcpOnly:
+                case TransportType.Amqp_WebSocket_Only:
+                case TransportType.Amqp_Tcp_Only:
                     this.transportType = transportType;
                     break;
                 case TransportType.Amqp:

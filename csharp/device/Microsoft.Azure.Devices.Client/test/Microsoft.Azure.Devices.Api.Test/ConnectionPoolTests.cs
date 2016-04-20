@@ -20,7 +20,7 @@ namespace Microsoft.Azure.Devices.Client.Test
             // Arrange
             var amqpConnectionPoolSettings = new AmqpConnectionPoolSettings();
             amqpConnectionPoolSettings.Pooling = false;
-            var amqpTransportSettings = new AmqpTransportSettings(TransportType.AmqpTcpOnly, 200, amqpConnectionPoolSettings);
+            var amqpTransportSettings = new AmqpTransportSettings(TransportType.Amqp_Tcp_Only, 200, amqpConnectionPoolSettings);
             string connectionString = "HostName=acme.azure-devices.net;DeviceId=device1;SharedAccessKey=CQN2K33r45/0WeIjpqmErV5EIvX8JZrozt3NEHCEkG8=";
             var iotHubConnectionString = IotHubConnectionStringBuilder.Create(connectionString).ToIotHubConnectionString();
             var connectionCache = new Mock<IotHubConnectionCache>();
@@ -43,7 +43,7 @@ namespace Microsoft.Azure.Devices.Client.Test
         {
             // Arrange
             var amqpConnectionPoolSettings = new AmqpConnectionPoolSettings();
-            var amqpTransportSettings = new AmqpTransportSettings(TransportType.AmqpTcpOnly, 200, amqpConnectionPoolSettings);
+            var amqpTransportSettings = new AmqpTransportSettings(TransportType.Amqp_Tcp_Only, 200, amqpConnectionPoolSettings);
             string connectionString = "HostName=acme.azure-devices.net;DeviceId=device1;SharedAccessKey=CQN2K33r45/0WeIjpqmErV5EIvX8JZrozt3NEHCEkG8=";
             var iotHubConnectionString = IotHubConnectionStringBuilder.Create(connectionString).ToIotHubConnectionString();
             var connectionCache = new Mock<IotHubConnectionCache>();
@@ -64,7 +64,7 @@ namespace Microsoft.Azure.Devices.Client.Test
         {
             // Arrange
             var amqpConnectionPoolSettings = new AmqpConnectionPoolSettings();
-            var amqpTransportSettings = new AmqpTransportSettings(TransportType.AmqpTcpOnly, 200, amqpConnectionPoolSettings);
+            var amqpTransportSettings = new AmqpTransportSettings(TransportType.Amqp_Tcp_Only, 200, amqpConnectionPoolSettings);
             string connectionString = "HostName=acme.azure-devices.net;DeviceId=device1;SharedAccessKey=CQN2K33r45/0WeIjpqmErV5EIvX8JZrozt3NEHCEkG8=";
             var iotHubConnectionString = IotHubConnectionStringBuilder.Create(connectionString).ToIotHubConnectionString();
             var connectionCache = new Mock<IotHubConnectionCache>();
@@ -90,7 +90,7 @@ namespace Microsoft.Azure.Devices.Client.Test
             var amqpConnectionPoolSettings = new AmqpConnectionPoolSettings();
             // Reduce poolsize to 1. This will mux all devices onto one connection
             amqpConnectionPoolSettings.MaxPoolSize = 1;
-            var amqpTransportSettings = new AmqpTransportSettings(TransportType.AmqpTcpOnly, 200, amqpConnectionPoolSettings);
+            var amqpTransportSettings = new AmqpTransportSettings(TransportType.Amqp_Tcp_Only, 200, amqpConnectionPoolSettings);
             string connectionString = "HostName=acme.azure-devices.net;DeviceId=device1;SharedAccessKey=CQN2K33r45/0WeIjpqmErV5EIvX8JZrozt3NEHCEkG8=";
             var iotHubConnectionString = IotHubConnectionStringBuilder.Create(connectionString).ToIotHubConnectionString();
             var connectionCache = new Mock<IotHubConnectionCache>();
@@ -116,7 +116,7 @@ namespace Microsoft.Azure.Devices.Client.Test
             // Arrange
 
             var amqpConnectionPoolSettings = new AmqpConnectionPoolSettings();
-            var amqpTransportSettings = new AmqpTransportSettings(TransportType.AmqpTcpOnly, 200, amqpConnectionPoolSettings);
+            var amqpTransportSettings = new AmqpTransportSettings(TransportType.Amqp_Tcp_Only, 200, amqpConnectionPoolSettings);
             string connectionString = "HostName=acme.azure-devices.net;DeviceId=device1;SharedAccessKey=CQN2K33r45/0WeIjpqmErV5EIvX8JZrozt3NEHCEkG8=";
             var iotHubConnectionString = IotHubConnectionStringBuilder.Create(connectionString).ToIotHubConnectionString();
             var connectionCache = new Mock<IotHubConnectionCache>();
@@ -143,7 +143,7 @@ namespace Microsoft.Azure.Devices.Client.Test
 
             var amqpConnectionPoolSettings = new AmqpConnectionPoolSettings();
             amqpConnectionPoolSettings.ConnectionIdleTimeout = TimeSpan.FromSeconds(5);
-            var amqpTransportSettings = new AmqpTransportSettings(TransportType.AmqpTcpOnly, 200, amqpConnectionPoolSettings);
+            var amqpTransportSettings = new AmqpTransportSettings(TransportType.Amqp_Tcp_Only, 200, amqpConnectionPoolSettings);
             string connectionString = "HostName=acme.azure-devices.net;DeviceId=device1;SharedAccessKey=CQN2K33r45/0WeIjpqmErV5EIvX8JZrozt3NEHCEkG8=";
             var iotHubConnectionString = IotHubConnectionStringBuilder.Create(connectionString).ToIotHubConnectionString();
             var connectionCache = new Mock<IotHubConnectionCache>();
@@ -178,7 +178,7 @@ namespace Microsoft.Azure.Devices.Client.Test
             // Arrange
             var amqpConnectionPoolSettings = new AmqpConnectionPoolSettings();
             amqpConnectionPoolSettings.ConnectionIdleTimeout = TimeSpan.FromSeconds(5);
-            var amqpTransportSettings = new AmqpTransportSettings(TransportType.AmqpTcpOnly, 200, amqpConnectionPoolSettings);
+            var amqpTransportSettings = new AmqpTransportSettings(TransportType.Amqp_Tcp_Only, 200, amqpConnectionPoolSettings);
             string connectionString = "HostName=acme.azure-devices.net;DeviceId=device1;SharedAccessKey=CQN2K33r45/0WeIjpqmErV5EIvX8JZrozt3NEHCEkG8=";
             var iotHubConnectionString = IotHubConnectionStringBuilder.Create(connectionString).ToIotHubConnectionString();
             var connectionCache = new Mock<IotHubConnectionCache>();
