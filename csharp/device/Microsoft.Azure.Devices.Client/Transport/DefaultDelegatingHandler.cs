@@ -1,7 +1,7 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-namespace Microsoft.Azure.Devices.Client
+namespace Microsoft.Azure.Devices.Client.Transport
 {
     using System;
     using System.Collections.Generic;
@@ -12,7 +12,7 @@ namespace Microsoft.Azure.Devices.Client
     {
         static readonly Task<Message> DummyResultObject = Task.FromResult((Message)null);
 
-        public IDelegatingHandler InnerHandler { get; set; }
+        public IDelegatingHandler InnerHandler { get; protected set; }
 
         protected DefaultDelegatingHandler()
             : this(null)
@@ -26,47 +26,47 @@ namespace Microsoft.Azure.Devices.Client
 
         public virtual Task OpenAsync(bool explicitOpen)
         {
-            return this.InnerHandler == null ? TaskConstants.Completed : this.InnerHandler.OpenAsync(explicitOpen);
+            return this.InnerHandler?.OpenAsync(explicitOpen) ?? TaskConstants.Completed;
         }
 
-        public virtual async Task CloseAsync()
+        public virtual Task CloseAsync()
         {
-            await (this.InnerHandler == null ? TaskConstants.Completed : this.InnerHandler.CloseAsync()).ContinueWith(t => GC.SuppressFinalize(this), TaskContinuationOptions.OnlyOnRanToCompletion);
+            return (this.InnerHandler == null ? TaskConstants.Completed : this.InnerHandler.CloseAsync()).ContinueWith(t => GC.SuppressFinalize(this), TaskContinuationOptions.OnlyOnRanToCompletion);
         }
 
         public virtual Task<Message> ReceiveAsync()
         {
-            return this.InnerHandler == null ? DummyResultObject : this.InnerHandler.ReceiveAsync();
+            return this.InnerHandler?.ReceiveAsync() ?? DummyResultObject;
         }
 
         public virtual Task<Message> ReceiveAsync(TimeSpan timeout)
         {
-            return this.InnerHandler == null ? DummyResultObject : this.InnerHandler.ReceiveAsync(timeout);
+            return this.InnerHandler?.ReceiveAsync(timeout) ?? DummyResultObject;
         }
 
         public virtual Task CompleteAsync(string lockToken)
         {
-            return this.InnerHandler == null ? TaskConstants.Completed : this.InnerHandler.CompleteAsync(lockToken);
+            return this.InnerHandler?.CompleteAsync(lockToken) ?? TaskConstants.Completed;
         }
 
         public virtual Task AbandonAsync(string lockToken)
         {
-            return this.InnerHandler == null ? TaskConstants.Completed : this.InnerHandler.AbandonAsync(lockToken);
+            return this.InnerHandler?.AbandonAsync(lockToken) ?? TaskConstants.Completed;
         }
 
         public virtual Task RejectAsync(string lockToken)
         {
-            return this.InnerHandler == null ? TaskConstants.Completed : this.InnerHandler.RejectAsync(lockToken);
+            return this.InnerHandler?.RejectAsync(lockToken) ?? TaskConstants.Completed;
         }
 
         public virtual Task SendEventAsync(Message message)
         {
-            return this.InnerHandler == null ? TaskConstants.Completed : this.InnerHandler == null ? TaskConstants.Completed : this.InnerHandler.SendEventAsync(message);
+            return this.InnerHandler?.SendEventAsync(message) ?? TaskConstants.Completed;
         }
 
         public virtual Task SendEventAsync(IEnumerable<Message> messages)
         {
-            return this.InnerHandler == null ? TaskConstants.Completed : this.InnerHandler.SendEventAsync(messages);
+            return this.InnerHandler?.SendEventAsync(messages) ?? TaskConstants.Completed;
         }
 
         protected virtual void Dispose(bool disposing)

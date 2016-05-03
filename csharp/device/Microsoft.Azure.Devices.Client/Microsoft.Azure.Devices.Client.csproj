@@ -139,7 +139,7 @@
     <Compile Include="Common\Exceptions\IotHubClientTransientException.cs" />
     <Compile Include="Common\TaskConstants.cs" />
     <Compile Include="Common\TaskUtils.cs" />
-    <Compile Include="DefaultDelegatingHandler.cs" />
+    <Compile Include="Transport\DefaultDelegatingHandler.cs" />
     <Compile Include="IDelegatingHandler.cs" />
     <Compile Include="IotHubDeviceScopeConnectionPool.cs" />
     <Compile Include="IotHubScopeConnectionPool.cs" />
@@ -147,6 +147,7 @@
     <Compile Include="IotHubDeviceMuxConnection.cs" />
     <Compile Include="IotHubTokenRefresher.cs" />
     <Compile Include="Transport\Mqtt\TransientErrorIgnoreStrategy.cs" />
+    <Compile Include="Transport\RetryDelegatingHandler.cs" />
     <Compile Include="Transport\RoutingHandler.cs" />
     <Compile Include="Transport\TransportHandler.cs" />
     <Compile Include="Transport\AmqpClientHelper.cs" />

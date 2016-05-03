@@ -6,7 +6,7 @@
 
     interface IDelegatingHandler: IDisposable
     {
-        IDelegatingHandler InnerHandler { get; set; }
+        IDelegatingHandler InnerHandler { get; }
 
         Task AbandonAsync(string lockToken);
         Task CloseAsync();

@@ -41,13 +41,13 @@ namespace Microsoft.Azure.Devices.Client.Transport
                     this.InnerHandler = this.transportHandlerFactory(this.iotHubConnectionString, transportSetting);
                     
                     // Try to open a connection with this transport
-                    await this.InnerHandler.OpenAsync(explicitOpen);
+                    await base.OpenAsync(explicitOpen);
                 }
                 catch (Exception exception)
                 {
                     if (this.InnerHandler != null)
                     {
-                        await this.InnerHandler.CloseAsync();
+                        await base.CloseAsync();
                     }
                     if (!(exception is IotHubCommunicationException || exception is TimeoutException || exception is SocketException || exception is AggregateException))
                     {

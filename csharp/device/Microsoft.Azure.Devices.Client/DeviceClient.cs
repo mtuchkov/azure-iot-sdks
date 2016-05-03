@@ -88,10 +88,10 @@ namespace Microsoft.Azure.Devices.Client
                 return t;
             });
 
-            this.innerHandler = new GateKeeperDelegatingHandler
-            {
-                InnerHandler = new ErrorDelegatingHandler(() => new RoutingHandler(this.CreateTransportHandler, iotHubConnectionString, transportSettings))
-            };
+            this.innerHandler = new GateKeeperDelegatingHandler(
+                new RetryDelegatingHandler(new ErrorDelegatingHandler(
+                        () => new RoutingHandler(this.CreateTransportHandler, iotHubConnectionString, transportSettings)))
+                );
         }
 
         DefaultDelegatingHandler CreateTransportHandler(IotHubConnectionString iotHubConnectionString, ITransportSettings transportSetting)
@@ -113,10 +113,8 @@ namespace Microsoft.Azure.Devices.Client
 #else
         DeviceClient(IotHubConnectionString iotHubConnectionString)
         {
-            this.innerHandler = new GatekeeperHandler
-            {
-                InnerHandler = new ErrorDelegatingHandler(()=> new HttpTransportHandler(iotHubConnectionString))
-            };
+            this.innerHandler = new GateKeeperDelegatingHandler(
+                new RetryDelegatingHandler(new ErrorDelegatingHandler(() => new HttpTransportHandler(iotHubConnectionString))));
         }
 #endif
 

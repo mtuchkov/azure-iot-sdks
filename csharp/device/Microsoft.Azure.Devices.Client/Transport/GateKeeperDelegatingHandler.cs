@@ -20,8 +20,9 @@ namespace Microsoft.Azure.Devices.Client.Transport
         volatile TaskCompletionSource<object> openTaskCompletionSource;
         readonly object thisLock;
 
-        public GateKeeperDelegatingHandler()
+        public GateKeeperDelegatingHandler(IDelegatingHandler innerHandler)
         {
+            this.InnerHandler = innerHandler;
             this.thisLock = new object();
             this.openTaskCompletionSource = new TaskCompletionSource<object>(this);
         }
@@ -156,7 +157,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
             if (needOpen)
             {
-                base.OpenAsync(explicitOpen).ContinueWith(
+                base.OpenAsync(true).ContinueWith(
                     t =>
                     {
                         TaskCompletionSource<object> localOpenTaskCompletionSource = this.openTaskCompletionSource;

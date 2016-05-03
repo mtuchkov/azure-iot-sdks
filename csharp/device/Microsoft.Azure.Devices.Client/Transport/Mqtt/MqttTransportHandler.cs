@@ -7,6 +7,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using System.Collections.Concurrent;
     using System.Collections.Generic;
     using System.Net;
+    using System.Net.Sockets;
     using System.Threading;
     using System.Threading.Tasks;
     using DotNetty.Codecs.Mqtt;
@@ -24,9 +25,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
     sealed class MqttTransportHandler : TransportHandler
     {
-        const int ProtocolGatewayPort = 8883;
-
-        [Flags]
         internal enum TransportState
         {
             NotInitialized = 1,
@@ -38,59 +36,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             Error = 64
         }
 
-        static readonly string GenerationId = Guid.NewGuid().ToString();
-        static readonly ConcurrentObjectPool<string, IEventLoopGroup> EventLoopGroupPool =
-            new ConcurrentObjectPool<string, IEventLoopGroup>(
-                Environment.ProcessorCount, 
-                () => new MultithreadEventLoopGroup(() => new SingleThreadEventLoop("MQTTExecutionThread", TimeSpan.FromSeconds(1)), 1), 
-                TimeSpan.FromSeconds(5), 
-                elg => elg.ShutdownGracefullyAsync());
-        
-        readonly IPAddress serverAddress;
-        readonly Func<IPAddress, int, Task<IChannel>> channelFactory;
-        readonly Queue<string> completionQueue;
-        readonly MqttIotHubAdapterFactory mqttIotHubAdapterFactory;
-        readonly QualityOfService qos;
+        Random random = new Random((int)DateTime.Now.Ticks);
+        int state = 4;
 
-        readonly string eventLoopGroupKey;
-        readonly object syncRoot = new object();
-        readonly CancellationTokenSource disconnectAwaitersCancellationSource = new CancellationTokenSource();
-        readonly RetryPolicy closeRetryPolicy;
-
-        readonly SemaphoreSlim receivingSemaphore = new SemaphoreSlim(0);
-        readonly ConcurrentQueue<Message> messageQueue;
-
-        readonly TaskCompletionSource connectCompletion = new TaskCompletionSource();
-        readonly TaskCompletionSource subscribeCompletionSource = new TaskCompletionSource();
-        Func<Task> cleanupFunc;
-        IChannel channel;
-        Exception fatalException;
-
-        int state = (int)TransportState.NotInitialized;
-        internal TransportState State => (TransportState)Volatile.Read(ref this.state);
-
-        internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString)
-            : this(iotHubConnectionString, new MqttTransportSettings(TransportType.Mqtt))
+        public MqttTransportHandler(ITransportSettings transportSettings)
+            : base(transportSettings)
         {
-            
-        }
-
-        internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings)
-            : this(iotHubConnectionString, settings, null)
-        {
-        }
-
-        internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings, Func<IPAddress, int, Task<IChannel>> channelFactory)
-            :base(settings)
-        {
-            this.mqttIotHubAdapterFactory = new MqttIotHubAdapterFactory(settings);
-            this.messageQueue = new ConcurrentQueue<Message>();
-            this.completionQueue = new Queue<string>();
-            this.serverAddress = Dns.GetHostEntry(iotHubConnectionString.HostName).AddressList[0];
-            this.qos = settings.PublishToServerQoS;
-            this.eventLoopGroupKey = iotHubConnectionString.IotHubName + "#" + iotHubConnectionString.DeviceId + "#" + iotHubConnectionString.Audience;
-            this.channelFactory = channelFactory ?? this.CreateChannelFactory(iotHubConnectionString, settings);
-            this.closeRetryPolicy = new RetryPolicy(new TransientErrorIgnoreStrategy(), 5, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
         }
 
         /// <summary>
@@ -129,7 +80,144 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             IotHubConnectionString iotHubConnectionString = IotHubConnectionString.Parse(connectionString);
 
-            return new MqttTransportHandler(iotHubConnectionString);
+            return new MqttTransportHandler(new MqttTransportSettings(TransportType.Mqtt));
+        }
+        internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString)
+            : this(iotHubConnectionString, new MqttTransportSettings(TransportType.Mqtt))
+        {
+
+        }
+
+        internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings)
+            : this(iotHubConnectionString, settings, null)
+        {
+        }
+
+        internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings, Func<IPAddress, int, Task<IChannel>> channelFactory)
+            : base(settings)
+        {
+            
+        }
+        internal TransportState State => (TransportState)Volatile.Read(ref this.state);
+
+        public override async Task SendEventAsync(Message message)
+        {
+            await Task.Delay(10);
+            if (this.random.Next(100) % 100 == 0)
+            {
+                Interlocked.Exchange(ref this.state, (int)TransportState.Error);
+                throw new SocketException();
+            }
+        }
+    }
+    sealed class MqttTransportHandler2 : TransportHandler
+    {
+        const int ProtocolGatewayPort = 8883;
+
+        [Flags]
+        internal enum TransportState
+        {
+            NotInitialized = 1,
+            Opening = 2,
+            Open = 4,
+            Subscribing = Open | 8,
+            Receiving = Open | 16,
+            Closed = 32,
+            Error = 64
+        }
+
+        readonly string generationId = Guid.NewGuid().ToString();
+        static readonly ConcurrentObjectPool<string, IEventLoopGroup> EventLoopGroupPool =
+            new ConcurrentObjectPool<string, IEventLoopGroup>(
+                Environment.ProcessorCount,
+                () => new MultithreadEventLoopGroup(() => new SingleThreadEventLoop("MQTTExecutionThread", TimeSpan.FromSeconds(1)), 1),
+                TimeSpan.FromSeconds(5),
+                elg => elg.ShutdownGracefullyAsync());
+
+        readonly IPAddress serverAddress;
+        readonly Func<IPAddress, int, Task<IChannel>> channelFactory;
+        readonly Queue<string> completionQueue;
+        readonly MqttIotHubAdapterFactory mqttIotHubAdapterFactory;
+        readonly QualityOfService qos;
+
+        readonly string eventLoopGroupKey;
+        readonly object syncRoot = new object();
+        readonly CancellationTokenSource disconnectAwaitersCancellationSource = new CancellationTokenSource();
+        readonly RetryPolicy closeRetryPolicy;
+
+        readonly SemaphoreSlim receivingSemaphore = new SemaphoreSlim(0);
+        readonly ConcurrentQueue<Message> messageQueue;
+
+        readonly TaskCompletionSource connectCompletion = new TaskCompletionSource();
+        readonly TaskCompletionSource subscribeCompletionSource = new TaskCompletionSource();
+        Func<Task> cleanupFunc;
+        IChannel channel;
+        Exception fatalException;
+
+        int state = (int)TransportState.NotInitialized;
+        internal TransportState State => (TransportState)Volatile.Read(ref this.state);
+
+        internal MqttTransportHandler2(IotHubConnectionString iotHubConnectionString)
+            : this(iotHubConnectionString, new MqttTransportSettings(TransportType.Mqtt))
+        {
+
+        }
+
+        internal MqttTransportHandler2(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings)
+            : this(iotHubConnectionString, settings, null)
+        {
+        }
+
+        internal MqttTransportHandler2(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings, Func<IPAddress, int, Task<IChannel>> channelFactory)
+            : base(settings)
+        {
+            this.mqttIotHubAdapterFactory = new MqttIotHubAdapterFactory(settings);
+            this.messageQueue = new ConcurrentQueue<Message>();
+            this.completionQueue = new Queue<string>();
+            this.serverAddress = Dns.GetHostEntry(iotHubConnectionString.HostName).AddressList[0];
+            this.qos = settings.PublishToServerQoS;
+            this.eventLoopGroupKey = iotHubConnectionString.IotHubName + "#" + iotHubConnectionString.DeviceId + "#" + iotHubConnectionString.Audience;
+            this.channelFactory = channelFactory ?? this.CreateChannelFactory(iotHubConnectionString, settings);
+            this.closeRetryPolicy = new RetryPolicy(new TransientErrorIgnoreStrategy(), 5, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        }
+
+        /// <summary>
+        /// Create a DeviceClient from individual parameters
+        /// </summary>
+        /// <param name="hostname">The fully-qualified DNS hostname of IoT Hub</param>
+        /// <param name="authMethod">The authentication method that is used</param>
+        /// <returns>DeviceClient</returns>
+        public static MqttTransportHandler2 Create(string hostname, IAuthenticationMethod authMethod)
+        {
+            if (hostname == null)
+            {
+                throw new ArgumentNullException(nameof(hostname));
+            }
+
+            if (authMethod == null)
+            {
+                throw new ArgumentNullException(nameof(authMethod));
+            }
+
+            IotHubConnectionStringBuilder connectionStringBuilder = IotHubConnectionStringBuilder.Create(hostname, authMethod);
+            return CreateFromConnectionString(connectionStringBuilder.ToString());
+        }
+
+        /// <summary>
+        /// Create DeviceClient from the specified connection string
+        /// </summary>
+        /// <param name="connectionString">Connection string for the IoT hub</param>
+        /// <returns>DeviceClient</returns>
+        public static MqttTransportHandler2 CreateFromConnectionString(string connectionString)
+        {
+            if (connectionString == null)
+            {
+                throw new ArgumentNullException(nameof(connectionString));
+            }
+
+            IotHubConnectionString iotHubConnectionString = IotHubConnectionString.Parse(connectionString);
+
+            return new MqttTransportHandler2(iotHubConnectionString);
         }
 
         #region Client operations
@@ -174,20 +262,15 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 return null;
             }
+
             Message message;
             lock (this.syncRoot)
             {
-                if (this.messageQueue.TryDequeue(out message))
+                this.messageQueue.TryDequeue(out message);
+                message.LockToken = this.generationId + message.LockToken;
+                if (this.qos == QualityOfService.AtLeastOnce)
                 {
-                    message.LockToken = GenerationId + message.LockToken;
-                    if (this.qos == QualityOfService.AtLeastOnce)
-                    {
-                        this.completionQueue.Enqueue(message.LockToken);
-                    }
-                }
-                else
-                {
-                    throw new IotHubClientException("Message queue is empty");
+                    this.completionQueue.Enqueue(message.LockToken);
                 }
             }
             return message;
@@ -199,50 +282,42 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             if (this.qos == QualityOfService.AtMostOnce)
             {
-                throw new IotHubClientException(new InvalidOperationException("Complete is not allowed for QoS 0."));
+                throw new IotHubClientTransientException("Complete is not allowed for QoS 0.");
             }
 
             Task completeOperationCompletion;
             lock (this.syncRoot)
             {
-                if (!lockToken.StartsWith(GenerationId))
+                if (!lockToken.StartsWith(this.generationId))
                 {
-                    throw new IotHubClientException(new InvalidOperationException("Lock token is stale or never existed."));
+                    throw new IotHubClientTransientException("Lock token is stale or never existed. The message will be redelivered, please discard this lock token and do not retry operation.");
                 }
+
                 if (this.completionQueue.Count == 0)
                 {
-                    throw new IotHubClientException(new InvalidOperationException("Unknown lock token."));
+                    throw new IotHubClientTransientException("Unknown lock token.");
                 }
+
                 string expectedLockToken = this.completionQueue.Peek();
-                if (expectedLockToken == lockToken)
+                if (expectedLockToken != lockToken)
                 {
-                    this.completionQueue.Dequeue();
-                    completeOperationCompletion = this.channel.WriteAndFlushAsync(lockToken);
+                    throw new IotHubClientTransientException($"Client MUST send PUBACK packets in the order in which the corresponding PUBLISH packets were received (QoS 1 messages) per [MQTT-4.6.0-2]. Expected lock token: '{expectedLockToken}'; actual lock token: '{lockToken}'.");
                 }
-                else
-                {
-                    throw new IotHubClientTransientException(new InvalidOperationException($"Client MUST send PUBACK packets in the order in which the corresponding PUBLISH packets were received (QoS 1 messages) per [MQTT-4.6.0-2]. Expected lock token: '{expectedLockToken}'; actual lock token: '{lockToken}'."));
-                }
+
+                this.completionQueue.Dequeue();
+                completeOperationCompletion = this.channel.WriteAndFlushAsync(lockToken);
             }
-            if (completeOperationCompletion == null)
-            {
-                //Token is not found. It is either a garbage or token from previous session in any case we should not fail the channel - user should decide what to do
-                throw new IotHubClientException("LockToken is not found. It is either not exist or this is a token from previous session. Do not retry operation");
-            }
-            else
-            {
-                await completeOperationCompletion;
-            }
+            await completeOperationCompletion;
         }
 
         public override Task AbandonAsync(string lockToken)
         {
-            throw new IotHubClientException(new NotSupportedException("MQTT protocol does not support this operation"));
+            throw new IotHubClientTransientException("MQTT protocol does not support this operation");
         }
 
         public override Task RejectAsync(string lockToken)
         {
-            throw new IotHubClientException(new NotSupportedException("MQTT protocol does not support this operation"));
+            throw new IotHubClientTransientException("MQTT protocol does not support this operation");
         }
 
         protected override void Dispose(bool disposing)
@@ -308,12 +383,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                     case TransportState.Opening:
                         this.connectCompletion.TrySetException(exception);
                         this.subscribeCompletionSource.TrySetException(exception);
-                        this.disconnectAwaitersCancellationSource.Cancel();
                         break;
                     case TransportState.Open:
                     case TransportState.Subscribing:
                         this.subscribeCompletionSource.TrySetException(exception);
-                        this.disconnectAwaitersCancellationSource.Cancel();
                         break;
                     case TransportState.Receiving:
                         this.disconnectAwaitersCancellationSource.Cancel();
@@ -326,7 +399,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
             catch (Exception ex) when (!ex.IsFatal())
             {
-                
+
             }
         }
 
@@ -337,7 +410,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 if ((previousState & illegalStates) > 0)
                 {
-                    return destination;
+                    return previousState;
                 }
                 TransportState prevState;
                 if ((prevState = (TransportState)Interlocked.CompareExchange(ref this.state, (int)destination, (int)previousState)) == previousState)
@@ -359,7 +432,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 {
                     this.channel = await this.channelFactory(this.serverAddress, ProtocolGatewayPort);
                 }
-                catch (Exception ex) when(!ex.IsFatal())
+                catch (Exception ex) when (!ex.IsFatal())
                 {
                     this.OnError(ex);
                     throw;
@@ -397,13 +470,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 case TransportState.NotInitialized:
                 case TransportState.Opening:
                     this.connectCompletion.TrySetCanceled();
-                    this.subscribeCompletionSource.TrySetCanceled();
-                    this.disconnectAwaitersCancellationSource.Cancel();
                     break;
                 case TransportState.Open:
                 case TransportState.Subscribing:
                     this.subscribeCompletionSource.TrySetCanceled();
-                    this.disconnectAwaitersCancellationSource.Cancel();
                     break;
                 case TransportState.Receiving:
                     this.disconnectAwaitersCancellationSource.Cancel();
@@ -421,9 +491,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 await this.channel.WriteAsync(new SubscribePacket());
                 if (this.TryStateTransition(TransportState.Subscribing, TransportState.Receiving))
                 {
-                    if (!this.subscribeCompletionSource.TryComplete())
+                    if (this.subscribeCompletionSource.TryComplete())
                     {
-                        await this.subscribeCompletionSource.Task;
+                        return;
                     }
                 }
             }

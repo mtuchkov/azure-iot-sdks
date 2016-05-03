@@ -22,7 +22,7 @@ namespace DeviceClientMqttSample
         {
             var test = new DeviceClientStressTest();
             test.TestInit();
-            test.CreateTonsOfClientsSuccessfully().Wait();
+            test.StartSending().Wait();
 
             try
             {

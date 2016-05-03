@@ -17,13 +17,9 @@ namespace Microsoft.Azure.Devices.Client.Transport
     using Microsoft.Azure.Devices.Client.Extensions;
     using Newtonsoft.Json;
 
-    sealed class HttpTransportHandler
-#if !WINDOWS_UWP
-        : TransportHandler
-#else
-        : DeviceClientDelegatingHandler
-#endif
+    sealed class HttpTransportHandler : DefaultDelegatingHandler
     {
+        readonly Http1TransportSettings transportSettings;
         static readonly TimeSpan DefaultOperationTimeout = TimeSpan.FromSeconds(60);
         static readonly IDictionary<string, string> MapMessageProperties2HttpHeaders = new Dictionary<string, string>
             {
@@ -59,8 +55,8 @@ namespace Microsoft.Azure.Devices.Client.Transport
         }
 
         internal HttpTransportHandler(IotHubConnectionString iotHubConnectionString, Http1TransportSettings transportSettings)
-            : base(transportSettings)
         {
+            this.transportSettings = transportSettings;
             this.deviceId = iotHubConnectionString.DeviceId;
             this.httpClientHelper = new HttpClientHelper(
                 iotHubConnectionString.HttpsEndpoint,
@@ -194,6 +190,11 @@ namespace Microsoft.Azure.Devices.Client.Transport
                 ExceptionHandlingHelper.GetDefaultErrorMapping(),
                 customHeaders,
                 CancellationToken.None);
+        }
+
+        public override Task<Message> ReceiveAsync()
+        {
+            return this.ReceiveAsync(TimeSpan.Zero);
         }
 
         public override async Task<Message> ReceiveAsync(TimeSpan timeout)

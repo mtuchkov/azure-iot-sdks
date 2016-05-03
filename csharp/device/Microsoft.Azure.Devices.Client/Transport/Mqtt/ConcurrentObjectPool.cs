@@ -12,22 +12,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
     sealed class ConcurrentObjectPool<TKey, TValue> where TValue : class
     {
-        class Entry
-        {
-            public TKey Key { get; }
-
-            public int RefCount { get; set; }
-
-            public Entry(TKey key, int refCount)
-            {
-                this.Key = key;
-                this.RefCount = refCount;
-            }
-        }
-
         class Slot
         {
-            public Dictionary<TKey, Entry> Entries { get; set; }
+            public Dictionary<TKey, int> References { get; set; }
 
             public DateTime LastUpdatedTime { get; set; }
 
@@ -36,7 +23,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         
         readonly TimeSpan keepAliveTimeout;
         readonly Func<TValue, Task> disposeCallback;
-        readonly IEqualityComparer<TKey> keyComparer;
         readonly int poolSize;
         readonly Func<TValue> objectFactory;
         readonly Slot[] slots;
@@ -56,13 +42,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             this.objectFactory = objectFactory;
             this.keepAliveTimeout = keepAliveTimeout;
             this.disposeCallback = disposeCallback;
-            this.keyComparer = keyComparer;
             this.slots = new Slot[poolSize];
             for (int i = 0; i < poolSize; i++)
             {
                 this.slots[i] = new Slot
                 {
-                    Entries = new Dictionary<TKey, Entry>(this.keyComparer)
+                    References = new Dictionary<TKey, int>(keyComparer)
                 };
             }
             this.cleanupTimer = new Timer(this.Cleanup, null, this.keepAliveTimeout, this.keepAliveTimeout);
@@ -72,8 +57,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             lock (this.syncRoot)
             {
-                Slot slot = this.slots.FirstOrDefault(s => s.Entries.ContainsKey(key));
-                TValue value;
+                Slot slot = this.slots.FirstOrDefault(s => s.References.ContainsKey(key));
 
                 if (slot == null)
                 {
@@ -82,18 +66,14 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                     {
                         slot.Value = this.objectFactory();
                     }
-                    value = slot.Value;
-                    slot.Entries.Add(key, new Entry(key, 1));
-                    slot.LastUpdatedTime = DateTime.UtcNow;
+                    slot.References.Add(key, 1);
                 }
                 else
                 {
-                    Entry entry = slot.Entries[key];
-                    entry.RefCount++;
-                    slot.LastUpdatedTime = DateTime.UtcNow;
-                    value = slot.Value;
+                    slot.References[key]++;
                 }
-                return value;
+                slot.LastUpdatedTime = DateTime.UtcNow;
+                return slot.Value;
             }
         }
 
@@ -103,16 +83,17 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 foreach (Slot slot in this.slots)
                 {
-                    Entry entry; 
-                    if (!slot.Entries.TryGetValue(key, out entry) || entry == null)
+                    int refCount; 
+                    if (!slot.References.TryGetValue(key, out refCount))
                     {
                         continue;
                     }
-                    entry.RefCount--;
-                    if (entry.RefCount == 0)
+                    refCount--;
+                    if (refCount == 0)
                     {
-                        slot.Entries.Remove(key);
+                        slot.References.Remove(key);
                     }
+                    slot.References[key] = refCount;
                     break;
                 }
             }
@@ -127,10 +108,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 for (int i = 0; i < poolSize; i++)
                 {
                     Slot slot = this.slots[i];
-                    if (slot.Entries.Count == 0 && slot.LastUpdatedTime < DateTime.UtcNow - this.keepAliveTimeout)
+                    if (slot.References.Count == 0 && slot.LastUpdatedTime < DateTime.UtcNow - this.keepAliveTimeout)
                     {
                         objectsToCleanup.Add(slot.Value);
-                        this.slots[i] = null;
+                        this.slots[i].Value = null;
                     }
                 }
             }
@@ -149,11 +130,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             catch (Exception ex) when (!ex.IsFatal())
             {
             }
-        }
-
-        bool IsKeyPresent(Entry x, TKey key)
-        {
-            return this.keyComparer?.Equals(key, x.Key) ?? x.Key.Equals(key);
         }
     }
 }

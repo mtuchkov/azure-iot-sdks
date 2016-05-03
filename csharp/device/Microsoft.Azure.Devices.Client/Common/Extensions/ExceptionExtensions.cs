@@ -5,6 +5,7 @@ namespace Microsoft.Azure.Devices.Client.Extensions
 {
     using System;
     using System.Collections.Generic;
+    using System.Collections.ObjectModel;
     using System.Globalization;
     using System.Linq;
     using System.Reflection;
@@ -29,12 +30,27 @@ namespace Microsoft.Azure.Devices.Client.Extensions
             return false;
         }
 
-        public static IEnumerable<Exception> Unwind(this Exception exception)
+        public static IEnumerable<Exception> Unwind(this Exception exception, bool unwindAggregate = false)
         {
             while (exception != null)
             {
                 yield return exception;
-                exception = exception.InnerException;
+                if (!unwindAggregate)
+                {
+                    exception = exception.InnerException;
+                    continue;
+                }
+                ReadOnlyCollection<Exception> execpetions = (exception as AggregateException)?.InnerExceptions;
+                if (execpetions != null)
+                {
+                    foreach (Exception ex in execpetions)
+                    {
+                        foreach (Exception innerEx in ex.Unwind(true))
+                        {
+                            yield return innerEx;
+                        }
+                    }
+                }
             }
         }
 
