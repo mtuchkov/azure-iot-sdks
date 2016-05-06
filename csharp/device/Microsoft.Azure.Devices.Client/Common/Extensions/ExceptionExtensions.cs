@@ -51,6 +51,7 @@ namespace Microsoft.Azure.Devices.Client.Extensions
                         }
                     }
                 }
+                exception = exception.InnerException;
             }
         }
 

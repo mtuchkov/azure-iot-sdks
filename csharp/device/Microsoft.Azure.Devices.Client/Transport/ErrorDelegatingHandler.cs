@@ -5,6 +5,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.IO;
     using System.Linq;
     using System.Threading;
@@ -20,7 +21,6 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
     sealed class ErrorDelegatingHandler : DefaultDelegatingHandler
     {
-
         static readonly HashSet<Type> NotTransientExceptions = new HashSet<Type>
         {
             typeof(UnauthorizedException),
@@ -32,6 +32,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
         static readonly HashSet<Type> TransientExceptions = new HashSet<Type>
         {
             typeof(IotHubClientTransientException),
+            typeof(IotHubCommunicationException),
             typeof(MessageTooLargeException),
             typeof(DeviceMessageLockLostException),
             typeof(ServerBusyException),
@@ -40,6 +41,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
             typeof(TimeoutException),
             typeof(ObjectDisposedException),
             typeof(OperationCanceledException),
+            typeof(TaskCanceledException),
 #if !PCL && !WINDOWS_UWP
             typeof(System.Net.Sockets.SocketException),
 #endif
@@ -147,6 +149,10 @@ namespace Microsoft.Azure.Devices.Client.Transport
             }
             catch (Exception ex) when (!ex.IsFatal())
             {
+                if (ex is TaskCanceledException)
+                {
+                    Debugger.Launch();
+                }
                 if (this.IsTransient(ex))
                 {
                     if (this.IsIotHubClientTransient(ex))
@@ -177,7 +183,6 @@ namespace Microsoft.Azure.Devices.Client.Transport
             }
             catch (Exception ex) when (!ex.IsFatal())
             {
-                Console.WriteLine(ex);
                 if (this.IsTransient(ex))
                 {
                     if (this.IsIotHubClientTransient(ex))

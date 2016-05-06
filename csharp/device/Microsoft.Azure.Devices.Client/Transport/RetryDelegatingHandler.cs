@@ -13,24 +13,36 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
     class RetryDelegatingHandler : DefaultDelegatingHandler
     {
+        class SendMessageState
+        {
+            public int Iteration { get; set; }
+
+            public long InitialStreamPosition { get; set; }
+
+            public ExceptionDispatchInfo OriginalError { get; set; }
+        }
+
         class IotHubTransientErrorIgnoreStrategy:ITransientErrorDetectionStrategy
         {
             public bool IsTransient(Exception ex)
             {
-                return ex is IotHubClientTransientException;
+                return ex is IotHubClientTransientException && (ex.Data["stopRetrying"] == null || !(bool)ex.Data["stopRetrying"]);
             }
         }
 
+        //Only for debug
         internal int retrycount;
 
         readonly RetryPolicy retryPolicy;
-        public RetryDelegatingHandler(DefaultDelegatingHandler innerHandler)
+        public RetryDelegatingHandler(IDelegatingHandler innerHandler)
             :base(innerHandler)
         {
-            this.retryPolicy = new RetryPolicy(new IotHubTransientErrorIgnoreStrategy(), 15, TimeSpan.FromMilliseconds(10), TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(10));
+            this.retryPolicy = new RetryPolicy(new IotHubTransientErrorIgnoreStrategy(), 15, TimeSpan.FromMilliseconds(100), TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(100));
+            //Only for debug
             this.retryPolicy.Retrying += RetryPolicy_Retrying;
         }
 
+        //Only for debug
         void RetryPolicy_Retrying(object sender, RetryingEventArgs e)
         {
             Interlocked.Increment(ref this.retrycount);
@@ -40,12 +52,29 @@ namespace Microsoft.Azure.Devices.Client.Transport
         {
             try
             {
-                await this.retryPolicy.ExecuteAsync(() => base.SendEventAsync(message));
+                var sendState = new SendMessageState();
+                await this.retryPolicy.ExecuteAsync(() => this.SendMessageWithRetryAsync(sendState, message, () => base.SendEventAsync(message)));
             }
             catch (IotHubClientTransientException ex)
             {
                 GetNormalizedIotHubException(ex).Throw();
             }
+        }
+
+        async Task SendMessageWithRetryAsync(SendMessageState sendState, Message message, Func<Task> action)
+        {
+            if (sendState.Iteration == 0)
+            {
+                sendState.InitialStreamPosition = message.BodyStream.Position;
+                message.ResetGetBodyCalled();
+
+                await TryExecuteActionAsync(sendState, action);
+                return;
+            }
+
+            EnsureStreamIsInOriginalState(sendState, message);
+
+            await TryExecuteActionAsync(sendState, action);
         }
 
         public override async Task<Message> ReceiveAsync()
@@ -131,6 +160,44 @@ namespace Microsoft.Azure.Devices.Client.Transport
             catch (IotHubClientTransientException ex)
             {
                 GetNormalizedIotHubException(ex).Throw();
+            }
+        }
+
+        static void EnsureStreamIsInOriginalState(SendMessageState sendState, Message message)
+        {
+            if (!message.BodyStream.CanRead)
+            {
+                sendState.OriginalError.SourceException.Data["stopRetrying"] = true;
+                sendState.OriginalError.Throw();
+            }
+
+            if (message.BodyStream.Position == sendState.InitialStreamPosition)
+            {
+                message.ResetGetBodyCalled();
+            }
+            else if (message.BodyStream.CanSeek)
+            {
+                message.BodyStream.Position = sendState.InitialStreamPosition;
+                message.ResetGetBodyCalled();
+            }
+            else
+            {
+                sendState.OriginalError.SourceException.Data["stopRetrying"] = true;
+                sendState.OriginalError.Throw();
+            }
+        }
+
+        static async Task TryExecuteActionAsync(SendMessageState sendState, Func<Task> action)
+        {
+            sendState.Iteration++;
+            try
+            {
+                await action();
+            }
+            catch (IotHubClientTransientException ex)
+            {
+                sendState.OriginalError = ExceptionDispatchInfo.Capture(ex);
+                throw;
             }
         }
 

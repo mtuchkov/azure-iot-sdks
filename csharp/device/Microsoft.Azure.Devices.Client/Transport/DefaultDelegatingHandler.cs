@@ -19,7 +19,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
         {
         }
 
-        protected DefaultDelegatingHandler(DefaultDelegatingHandler innerHandler)
+        protected DefaultDelegatingHandler(IDelegatingHandler innerHandler)
         {
             this.InnerHandler = innerHandler;
         }
@@ -28,10 +28,19 @@ namespace Microsoft.Azure.Devices.Client.Transport
         {
             return this.InnerHandler?.OpenAsync(explicitOpen) ?? TaskConstants.Completed;
         }
-
+        
         public virtual Task CloseAsync()
         {
-            return (this.InnerHandler == null ? TaskConstants.Completed : this.InnerHandler.CloseAsync()).ContinueWith(t => GC.SuppressFinalize(this), TaskContinuationOptions.OnlyOnRanToCompletion);
+            if (this.InnerHandler == null)
+            {
+                return TaskConstants.Completed;
+            }
+            else
+            {
+                Task closeTask = this.InnerHandler.CloseAsync();
+                closeTask.ContinueWith(t => GC.SuppressFinalize(this), TaskContinuationOptions.OnlyOnRanToCompletion | TaskContinuationOptions.ExecuteSynchronously);
+                return closeTask;
+            }
         }
 
         public virtual Task<Message> ReceiveAsync()

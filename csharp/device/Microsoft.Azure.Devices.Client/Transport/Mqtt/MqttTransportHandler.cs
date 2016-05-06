@@ -6,6 +6,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using System;
     using System.Collections.Concurrent;
     using System.Collections.Generic;
+    using System.Linq;
     using System.Net;
     using System.Net.Sockets;
     using System.Threading;
@@ -23,7 +24,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
     using Microsoft.Practices.EnterpriseLibrary.TransientFaultHandling;
     using TransportType = Microsoft.Azure.Devices.Client.TransportType;
 
-    sealed class MqttTransportHandler : TransportHandler
+    sealed class MqttTransportHandler3 : TransportHandler
     {
         internal enum TransportState
         {
@@ -39,7 +40,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         Random random = new Random((int)DateTime.Now.Ticks);
         int state = 4;
 
-        public MqttTransportHandler(ITransportSettings transportSettings)
+        public MqttTransportHandler3(ITransportSettings transportSettings)
             : base(transportSettings)
         {
         }
@@ -50,7 +51,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         /// <param name="hostname">The fully-qualified DNS hostname of IoT Hub</param>
         /// <param name="authMethod">The authentication method that is used</param>
         /// <returns>DeviceClient</returns>
-        public static MqttTransportHandler Create(string hostname, IAuthenticationMethod authMethod)
+        public static MqttTransportHandler3 Create(string hostname, IAuthenticationMethod authMethod)
         {
             if (hostname == null)
             {
@@ -71,7 +72,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         /// </summary>
         /// <param name="connectionString">Connection string for the IoT hub</param>
         /// <returns>DeviceClient</returns>
-        public static MqttTransportHandler CreateFromConnectionString(string connectionString)
+        public static MqttTransportHandler3 CreateFromConnectionString(string connectionString)
         {
             if (connectionString == null)
             {
@@ -80,20 +81,20 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             IotHubConnectionString iotHubConnectionString = IotHubConnectionString.Parse(connectionString);
 
-            return new MqttTransportHandler(new MqttTransportSettings(TransportType.Mqtt));
+            return new MqttTransportHandler3(new MqttTransportSettings(TransportType.Mqtt));
         }
-        internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString)
+        internal MqttTransportHandler3(IotHubConnectionString iotHubConnectionString)
             : this(iotHubConnectionString, new MqttTransportSettings(TransportType.Mqtt))
         {
 
         }
 
-        internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings)
+        internal MqttTransportHandler3(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings)
             : this(iotHubConnectionString, settings, null)
         {
         }
 
-        internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings, Func<IPAddress, int, Task<IChannel>> channelFactory)
+        internal MqttTransportHandler3(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings, Func<IPAddress, int, Task<IChannel>> channelFactory)
             : base(settings)
         {
             
@@ -103,6 +104,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         public override async Task SendEventAsync(Message message)
         {
             await Task.Delay(10);
+        }
+        public override async Task OpenAsync(bool t)
+        {
+            await Task.Delay(10);
             if (this.random.Next(100) % 100 == 0)
             {
                 Interlocked.Exchange(ref this.state, (int)TransportState.Error);
@@ -110,7 +115,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
     }
-    sealed class MqttTransportHandler2 : TransportHandler
+    sealed class MqttTransportHandler : TransportHandler
     {
         const int ProtocolGatewayPort = 8883;
 
@@ -157,18 +162,18 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         int state = (int)TransportState.NotInitialized;
         internal TransportState State => (TransportState)Volatile.Read(ref this.state);
 
-        internal MqttTransportHandler2(IotHubConnectionString iotHubConnectionString)
+        internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString)
             : this(iotHubConnectionString, new MqttTransportSettings(TransportType.Mqtt))
         {
 
         }
 
-        internal MqttTransportHandler2(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings)
+        internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings)
             : this(iotHubConnectionString, settings, null)
         {
         }
 
-        internal MqttTransportHandler2(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings, Func<IPAddress, int, Task<IChannel>> channelFactory)
+        internal MqttTransportHandler(IotHubConnectionString iotHubConnectionString, MqttTransportSettings settings, Func<IPAddress, int, Task<IChannel>> channelFactory)
             : base(settings)
         {
             this.mqttIotHubAdapterFactory = new MqttIotHubAdapterFactory(settings);
@@ -187,7 +192,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         /// <param name="hostname">The fully-qualified DNS hostname of IoT Hub</param>
         /// <param name="authMethod">The authentication method that is used</param>
         /// <returns>DeviceClient</returns>
-        public static MqttTransportHandler2 Create(string hostname, IAuthenticationMethod authMethod)
+        public static MqttTransportHandler Create(string hostname, IAuthenticationMethod authMethod)
         {
             if (hostname == null)
             {
@@ -208,7 +213,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         /// </summary>
         /// <param name="connectionString">Connection string for the IoT hub</param>
         /// <returns>DeviceClient</returns>
-        public static MqttTransportHandler2 CreateFromConnectionString(string connectionString)
+        public static MqttTransportHandler CreateFromConnectionString(string connectionString)
         {
             if (connectionString == null)
             {
@@ -217,7 +222,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             IotHubConnectionString iotHubConnectionString = IotHubConnectionString.Parse(connectionString);
 
-            return new MqttTransportHandler2(iotHubConnectionString);
+            return new MqttTransportHandler(iotHubConnectionString);
         }
 
         #region Client operations
@@ -369,11 +374,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         async void OnError(Exception exception)
         {
-            this.fatalException = exception;
             try
             {
                 TransportState previousState = this.MoveToStateIfPossible(TransportState.Error, TransportState.Closed);
-
                 switch (previousState)
                 {
                     case TransportState.Error:
@@ -381,14 +384,17 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                         return;
                     case TransportState.NotInitialized:
                     case TransportState.Opening:
+                        this.fatalException = exception;
                         this.connectCompletion.TrySetException(exception);
                         this.subscribeCompletionSource.TrySetException(exception);
                         break;
                     case TransportState.Open:
                     case TransportState.Subscribing:
+                        this.fatalException = exception;
                         this.subscribeCompletionSource.TrySetException(exception);
                         break;
                     case TransportState.Receiving:
+                        this.fatalException = exception;
                         this.disconnectAwaitersCancellationSource.Cancel();
                         break;
                     default:

@@ -61,10 +61,12 @@
     <Compile Include="ConnectionPoolTests.cs" />
     <Compile Include="ConnectionString\DeviceClientConnectionStringExceptionTests.cs" />
     <Compile Include="ConnectionString\DeviceClientConnectionStringTests.cs" />
+    <Compile Include="ExceptionAssertions.cs" />
+    <Compile Include="GateKeeperDelegatingHandlerTests.cs" />
     <Compile Include="MessageTests.cs" />
+    <Compile Include="RetryDelegatingHandlerTests.cs" />
     <Compile Include="TestAssert.cs" />
     <Compile Include="TransportSettingsTests.cs" />
-    <Compile Include="UnitTest1.cs" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Properties\" />
@@ -111,6 +113,10 @@
     </Reference>
     <Reference Include="Newtonsoft.Json, Version=6.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
       <HintPath>..\..\..\packages\Newtonsoft.Json.6.0.8\lib\net45\Newtonsoft.Json.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="NSubstitute, Version=1.10.0.0, Culture=neutral, PublicKeyToken=92dd2e9066daa5ca, processorArchitecture=MSIL">
+      <HintPath>..\..\..\packages\NSubstitute.1.10.0.0\lib\net45\NSubstitute.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="PCLCrypto, Version=1.0.0.0, Culture=neutral, PublicKeyToken=d4421c8a4786956c, processorArchitecture=MSIL">

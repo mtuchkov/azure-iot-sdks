@@ -5,10 +5,13 @@ namespace Microsoft.Azure.Devices.Client.Transport
 {
     using System;
     using System.Collections.ObjectModel;
+    using System.Diagnostics;
     using System.Linq;
     using System.Net.Sockets;
+    using System.Threading;
     using System.Threading.Tasks;
     using Microsoft.Azure.Devices.Client.Exceptions;
+    using Microsoft.Azure.Devices.Client.Extensions;
 
     class RoutingHandler : DefaultDelegatingHandler
     {
@@ -39,16 +42,44 @@ namespace Microsoft.Azure.Devices.Client.Transport
                 try
                 {
                     this.InnerHandler = this.transportHandlerFactory(this.iotHubConnectionString, transportSetting);
-                    
+
                     // Try to open a connection with this transport
+                    var stopwatch = new Stopwatch();
+                    stopwatch.Start();
                     await base.OpenAsync(explicitOpen);
+                    stopwatch.Stop();
+                    long elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
+                    bool lockTaken = false;
+                    try
+                    {
+                        spinLock.TryEnter(1, ref lockTaken);
+                        if (lockTaken)
+                        {
+                            latencies[(int)elapsedMilliseconds]++;
+                        }
+                    }
+                    finally
+                    {
+                        if (lockTaken)
+                        {
+                            spinLock.Exit(false);
+                        }
+                    }
                 }
                 catch (Exception exception)
                 {
-                    if (this.InnerHandler != null)
+                    try
                     {
-                        await base.CloseAsync();
+                        if (this.InnerHandler != null)
+                        {
+                            await base.CloseAsync();
+                        }
                     }
+                    catch (Exception ex) when (!ex.IsFatal())
+                    {
+                        //ignore close failures    
+                    }
+
                     if (!(exception is IotHubCommunicationException || exception is TimeoutException || exception is SocketException || exception is AggregateException))
                     {
                         throw;
@@ -75,8 +106,21 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
             if (lastException != null)
             {
-                throw new InvalidOperationException("Unable to open transport", lastException);
+                throw new IotHubCommunicationException("Unable to open transport", lastException);
             }
+        }
+
+        internal static readonly int[] latencies = new int[1000 * 60 * 10];
+        internal static SpinLock spinLock = new SpinLock();
+        
+        public RoutingHandler()
+        {
+            
+        }
+
+        public override async Task SendEventAsync(Message message)
+        {
+            await base.SendEventAsync(message);
         }
     }
 }
