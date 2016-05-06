@@ -53,16 +53,15 @@ namespace Microsoft.Azure.Devices.Client.Transport
             typeof(MessageTooLargeException),
             typeof(DeviceMessageLockLostException),
             typeof(ServerBusyException),
-            typeof(TimeoutException),
             typeof(OperationCanceledException),
         };
 
-        readonly Func<DefaultDelegatingHandler> handlerFactory;
+        readonly Func<IDelegatingHandler> handlerFactory;
 
         volatile TaskCompletionSource openCompletion;
         internal int ResetCounter;
 
-        public ErrorDelegatingHandler(Func<DefaultDelegatingHandler> handlerFactory)
+        public ErrorDelegatingHandler(Func<IDelegatingHandler> handlerFactory)
         {
             this.handlerFactory = handlerFactory;
         }

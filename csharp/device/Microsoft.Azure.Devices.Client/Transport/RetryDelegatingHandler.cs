@@ -61,20 +61,17 @@ namespace Microsoft.Azure.Devices.Client.Transport
             }
         }
 
-        async Task SendMessageWithRetryAsync(SendMessageState sendState, Message message, Func<Task> action)
+        public override async Task SendEventAsync(IEnumerable<Message> messages)
         {
-            if (sendState.Iteration == 0)
+            try
             {
-                sendState.InitialStreamPosition = message.BodyStream.Position;
-                message.ResetGetBodyCalled();
-
-                await TryExecuteActionAsync(sendState, action);
-                return;
+                var sendState = new SendMessageState();
+                await this.retryPolicy.ExecuteAsync(() => this.SendMessageWithRetryAsync(sendState, messages, () => base.SendEventAsync(messages)));
             }
-
-            EnsureStreamIsInOriginalState(sendState, message);
-
-            await TryExecuteActionAsync(sendState, action);
+            catch (IotHubClientTransientException ex)
+            {
+                GetNormalizedIotHubException(ex).Throw();
+            }
         }
 
         public override async Task<Message> ReceiveAsync()
@@ -100,18 +97,6 @@ namespace Microsoft.Azure.Devices.Client.Transport
             {
                 GetNormalizedIotHubException(ex).Throw();
                 throw;
-            }
-        }
-
-        public override async Task SendEventAsync(IEnumerable<Message> messages)
-        {
-            try
-            {
-                await this.retryPolicy.ExecuteAsync(() => base.SendEventAsync(messages));
-            }
-            catch (IotHubClientTransientException ex)
-            {
-                GetNormalizedIotHubException(ex).Throw();
             }
         }
 
@@ -160,6 +145,71 @@ namespace Microsoft.Azure.Devices.Client.Transport
             catch (IotHubClientTransientException ex)
             {
                 GetNormalizedIotHubException(ex).Throw();
+            }
+        }
+
+        async Task SendMessageWithRetryAsync(SendMessageState sendState, IEnumerable<Message> messages, Func<Task> action)
+        {
+            if (sendState.Iteration == 0)
+            {
+                foreach (Message message in messages)
+                {
+                    sendState.InitialStreamPosition = message.BodyStream.Position > 0 ? message.BodyStream.Position : 0;
+                    message.ResetGetBodyCalled();
+                }
+
+                await TryExecuteActionAsync(sendState, action);
+                return;
+            }
+
+            EnsureStreamsAreInOriginalState(sendState, messages);
+
+            await TryExecuteActionAsync(sendState, action);
+        }
+
+        async Task SendMessageWithRetryAsync(SendMessageState sendState, Message message, Func<Task> action)
+        {
+            if (sendState.Iteration == 0)
+            {
+                sendState.InitialStreamPosition = message.BodyStream.Position;
+                message.ResetGetBodyCalled();
+
+                await TryExecuteActionAsync(sendState, action);
+                return;
+            }
+
+            EnsureStreamIsInOriginalState(sendState, message);
+
+            await TryExecuteActionAsync(sendState, action);
+        }
+
+        static void EnsureStreamsAreInOriginalState(SendMessageState sendState, IEnumerable<Message> messages)
+        {
+            foreach (Message message in messages)
+            {
+                if (!message.BodyStream.CanRead)
+                {
+                    sendState.OriginalError.SourceException.Data["stopRetrying"] = true;
+                    sendState.OriginalError.Throw();
+                }
+
+                if (message.BodyStream.Position == 0)
+                {
+                    message.ResetGetBodyCalled();
+                }
+
+                //Initial stream position can be not 0 intentionally, i.e. users may want to send the message starting from offset.
+                //However, we don't want to store initial positions of each message, so we just leave this rare scenario to the user.
+                else if (message.BodyStream.CanSeek && sendState.InitialStreamPosition == 0)
+                {
+                    message.BodyStream.Position = 0;
+                    message.ResetGetBodyCalled();
+                }
+                else
+                {
+                    sendState.OriginalError.SourceException.Data["stopRetrying"] = true;
+                    sendState.OriginalError.Throw();
+                }
             }
         }
 

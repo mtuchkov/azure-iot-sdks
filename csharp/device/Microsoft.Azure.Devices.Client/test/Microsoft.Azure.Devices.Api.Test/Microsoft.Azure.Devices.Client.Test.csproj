@@ -61,6 +61,7 @@
     <Compile Include="ConnectionPoolTests.cs" />
     <Compile Include="ConnectionString\DeviceClientConnectionStringExceptionTests.cs" />
     <Compile Include="ConnectionString\DeviceClientConnectionStringTests.cs" />
+    <Compile Include="ErrorDelegatingHandlerTests.cs" />
     <Compile Include="ExceptionAssertions.cs" />
     <Compile Include="GateKeeperDelegatingHandlerTests.cs" />
     <Compile Include="MessageTests.cs" />

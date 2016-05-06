@@ -13,6 +13,11 @@ namespace Microsoft.Azure.Devices.Client.Exceptions
         {
         }
 
+        public IotHubClientTransientException()
+            : base("Transient exception occured. Please retry operation.", true)
+        {
+        }
+
         public IotHubClientTransientException(string message)
             : base(message, true)
         {

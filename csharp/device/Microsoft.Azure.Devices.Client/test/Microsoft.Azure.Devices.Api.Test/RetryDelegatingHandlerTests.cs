@@ -3,7 +3,9 @@
 namespace Microsoft.Azure.Devices.Client.Test
 {
     using System;
+    using System.Collections.Generic;
     using System.IO;
+    using System.Linq;
     using System.Threading.Tasks;
     using Microsoft.Azure.Devices.Client.Common;
     using Microsoft.Azure.Devices.Client.Exceptions;
@@ -94,6 +96,66 @@ namespace Microsoft.Azure.Devices.Client.Test
 
             var sut = new RetryDelegatingHandler(innerHandlerMock);
             await sut.SendEventAsync(message).ExpectedAsync<IotHubClientTransientException>();
+
+            Assert.AreEqual(callCounter, 1);
+        }
+
+        [TestMethod]
+        [TestCategory("CIT")]
+        [TestCategory("DelegatingHandlers")]
+        [TestCategory("Owner [mtuchkov]")]
+        public async Task Retry_OneMessageHasBeenTouchedTransientExceptionOccured_Success()
+        {
+            int callCounter = 0;
+
+            var innerHandlerMock = Substitute.For<IDelegatingHandler>();
+            var message = new Message(new MemoryStream(new byte[] {1,2,3}));
+            IEnumerable<Message> messages = new[] { message };
+            innerHandlerMock.SendEventAsync(Arg.Is(messages)).Returns(t =>
+            {
+                callCounter++;
+
+                Message m = t.Arg<IEnumerable<Message>>().First();
+                Stream stream = m.BodyStream;
+                if (callCounter == 1)
+                {
+                    throw new IotHubClientTransientException("");
+                }
+                var buffer = new byte[3];
+                stream.Read(buffer, 0, 3);
+                return TaskConstants.Completed;
+            });
+
+            var sut = new RetryDelegatingHandler(innerHandlerMock);
+            await sut.SendEventAsync(messages);
+
+            Assert.AreEqual(2, callCounter);
+        }
+
+        [TestMethod]
+        [TestCategory("CIT")]
+        [TestCategory("DelegatingHandlers")]
+        [TestCategory("Owner [mtuchkov]")]
+        public async Task Retry_OneMessageHasBeenReadTransientExceptionOccured_Throws()
+        {
+            int callCounter = 0;
+
+            var innerHandlerMock = Substitute.For<IDelegatingHandler>();
+            var memoryStream = new NotSeekableStream(new byte[] {1,2,3});
+            var message = new Message(memoryStream);
+            var messages = new[] { message };
+            innerHandlerMock.SendEventAsync(Arg.Is(messages)).Returns(t =>
+            {
+                callCounter++;
+                Message m = t.Arg<IEnumerable<Message>>().First();
+                Stream stream = m.BodyStream;
+                var buffer = new byte[3];
+                stream.Read(buffer, 0, 3);
+                throw new IotHubClientTransientException("");
+            });
+
+            var sut = new RetryDelegatingHandler(innerHandlerMock);
+            await sut.SendEventAsync(messages).ExpectedAsync<IotHubClientTransientException>();
 
             Assert.AreEqual(callCounter, 1);
         }
