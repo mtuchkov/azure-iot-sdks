@@ -21,7 +21,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
     sealed class ErrorDelegatingHandler : DefaultDelegatingHandler
     {
-        static readonly HashSet<Type> NotTransientExceptions = new HashSet<Type>
+        internal static readonly HashSet<Type> NonTransientExceptions = new HashSet<Type>
         {
             typeof(UnauthorizedException),
             typeof(IotHubNotFoundException),
@@ -29,7 +29,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
             typeof(QuotaExceededException),
         };
 
-        static readonly HashSet<Type> TransientExceptions = new HashSet<Type>
+        internal static readonly HashSet<Type> TransientExceptions = new HashSet<Type>
         {
             typeof(IotHubClientTransientException),
             typeof(IotHubCommunicationException),
@@ -47,13 +47,14 @@ namespace Microsoft.Azure.Devices.Client.Transport
 #endif
         };
 
-        static readonly HashSet<Type> TransportTransientExceptions = new HashSet<Type>
+        internal static readonly HashSet<Type> TransportTransientExceptions = new HashSet<Type>
         {
             typeof(IotHubClientTransientException),
             typeof(MessageTooLargeException),
             typeof(DeviceMessageLockLostException),
             typeof(ServerBusyException),
             typeof(OperationCanceledException),
+            typeof(TaskCanceledException),
         };
 
         readonly Func<IDelegatingHandler> handlerFactory;
@@ -69,6 +70,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
         public override async Task OpenAsync(bool explicitOpen)
         {
             TaskCompletionSource openPromise = this.openCompletion;
+            IDelegatingHandler handler = this.InnerHandler;
             if (openPromise == null)
             {
                 openPromise = new TaskCompletionSource();
@@ -83,9 +85,13 @@ namespace Microsoft.Azure.Devices.Client.Transport
                         await this.ExecuteWithErrorHandlingAsync(() => base.OpenAsync(explicitOpen), false);
                         openPromise.TryComplete();
                     }
+                    catch (Exception ex) when (IsIotHubClientTransient(ex))
+                    {
+                        Reset(openPromise, handler);
+                        throw;
+                    }
                     catch (Exception ex) when (!ex.IsFatal())
                     {
-                        openPromise.TrySetException(ex);
                         throw;
                     }
                 }
@@ -148,17 +154,21 @@ namespace Microsoft.Azure.Devices.Client.Transport
             }
             catch (Exception ex) when (!ex.IsFatal())
             {
-                if (ex is TaskCanceledException)
-                {
-                    Debugger.Launch();
-                }
                 if (this.IsTransient(ex))
                 {
                     if (this.IsIotHubClientTransient(ex))
                     {
-                        throw;
+                        if (ex is IotHubClientTransientException)
+                        {
+                            throw;
+                        }
+                        throw new IotHubClientTransientException("Transient error occured, please retry.", ex);
                     }
                     this.Reset(completedPromise, handler);
+                    if (ex is IotHubClientTransientException)
+                    {
+                        throw;
+                    }
                     throw new IotHubClientTransientException("Transient error occured, please retry.", ex);
                 }
                 this.Reset(completedPromise, handler);
@@ -186,9 +196,17 @@ namespace Microsoft.Azure.Devices.Client.Transport
                 {
                     if (this.IsIotHubClientTransient(ex))
                     {
-                        throw;
+                        if (ex is IotHubClientTransientException)
+                        {
+                            throw;
+                        }
+                        throw new IotHubClientTransientException("Transient error occured, please retry.", ex);
                     }
                     this.Reset(completedPromise, handler);
+                    if (ex is IotHubClientTransientException)
+                    {
+                        throw;
+                    }
                     throw new IotHubClientTransientException("Transient error occured, please retry.", ex);
                 }
                 this.Reset(completedPromise, handler);
@@ -209,7 +227,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
         bool IsTransient(Exception exception)
         {
             //We should check the non-transient first
-            if (exception.Unwind(true).Any(e => NotTransientExceptions.Contains(e.GetType())))
+            if (exception.Unwind(true).Any(e => NonTransientExceptions.Contains(e.GetType())))
             {
                 return false;
             }

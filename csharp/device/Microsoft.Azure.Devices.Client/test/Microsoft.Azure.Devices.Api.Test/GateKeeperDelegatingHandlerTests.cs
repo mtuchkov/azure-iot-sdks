@@ -37,7 +37,7 @@ namespace Microsoft.Azure.Devices.Client.Test
         [TestCategory("CIT")]
         [TestCategory("DelegatingHandlers")]
         [TestCategory("Owner [mtuchkov]")]
-        public async Task ImplicitOpen_SutWasNotOpen_SutIsOpen()
+        public async Task ImplicitOpen_SubjWasNotOpen_SubjIsOpen()
         {
             var innerHandlerMock = Substitute.For<IDelegatingHandler>();
             innerHandlerMock.OpenAsync(false).Returns(t => TaskConstants.Completed);
@@ -68,6 +68,8 @@ namespace Microsoft.Azure.Devices.Client.Test
                 Assert.IsTrue(sut.Open);
                 Assert.IsFalse(sut.Closed);
             }
+
+            await innerHandlerMock.Received(actions.Length).OpenAsync(false);
         }
 
         [TestMethod]

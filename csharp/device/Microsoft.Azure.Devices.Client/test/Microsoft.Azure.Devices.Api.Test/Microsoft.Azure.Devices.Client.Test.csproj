@@ -66,6 +66,7 @@
     <Compile Include="GateKeeperDelegatingHandlerTests.cs" />
     <Compile Include="MessageTests.cs" />
     <Compile Include="RetryDelegatingHandlerTests.cs" />
+    <Compile Include="RoutingDelegatingHandlerTests.cs" />
     <Compile Include="TestAssert.cs" />
     <Compile Include="TransportSettingsTests.cs" />
   </ItemGroup>

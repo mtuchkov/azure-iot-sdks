@@ -13,15 +13,20 @@ namespace Microsoft.Azure.Devices.Client.Transport
     using Microsoft.Azure.Devices.Client.Exceptions;
     using Microsoft.Azure.Devices.Client.Extensions;
 
-    class RoutingHandler : DefaultDelegatingHandler
+    /// <summary>
+    /// Transport handler router. 
+    /// Tries to open open transport in the order it was set. 
+    /// If fails tries to open the next one, etc.
+    /// </summary>
+    class RoutingDelegatingHandler : DefaultDelegatingHandler
     {
-        internal delegate DefaultDelegatingHandler TransportHandlerFactory(IotHubConnectionString iotHubConnectionString, ITransportSettings transportSettings);
+        internal delegate IDelegatingHandler TransportHandlerFactory(IotHubConnectionString iotHubConnectionString, ITransportSettings transportSettings);
 
         readonly TransportHandlerFactory transportHandlerFactory;
         readonly IotHubConnectionString iotHubConnectionString;
         readonly ITransportSettings[] transportSettings;
 
-        public RoutingHandler(TransportHandlerFactory transportHandlerFactory, IotHubConnectionString iotHubConnectionString, ITransportSettings[] transportSettings)
+        public RoutingDelegatingHandler(TransportHandlerFactory transportHandlerFactory, IotHubConnectionString iotHubConnectionString, ITransportSettings[] transportSettings)
         {
             this.transportHandlerFactory = transportHandlerFactory;
             this.iotHubConnectionString = iotHubConnectionString;
@@ -44,27 +49,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
                     this.InnerHandler = this.transportHandlerFactory(this.iotHubConnectionString, transportSetting);
 
                     // Try to open a connection with this transport
-                    var stopwatch = new Stopwatch();
-                    stopwatch.Start();
                     await base.OpenAsync(explicitOpen);
-                    stopwatch.Stop();
-                    long elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
-                    bool lockTaken = false;
-                    try
-                    {
-                        spinLock.TryEnter(1, ref lockTaken);
-                        if (lockTaken)
-                        {
-                            latencies[(int)elapsedMilliseconds]++;
-                        }
-                    }
-                    finally
-                    {
-                        if (lockTaken)
-                        {
-                            spinLock.Exit(false);
-                        }
-                    }
                 }
                 catch (Exception exception)
                 {
@@ -72,7 +57,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
                     {
                         if (this.InnerHandler != null)
                         {
-                            await base.CloseAsync();
+                            await this.CloseAsync();
                         }
                     }
                     catch (Exception ex) when (!ex.IsFatal())
@@ -110,17 +95,38 @@ namespace Microsoft.Azure.Devices.Client.Transport
             }
         }
 
-        internal static readonly int[] latencies = new int[1000 * 60 * 10];
-        internal static SpinLock spinLock = new SpinLock();
+        //Everything below just for test purposese and won't go to public
+        internal static readonly int[] Latencies = new int[1000 * 60 * 10];
+        internal static SpinLock SpinLock = new SpinLock();
         
-        public RoutingHandler()
+        public RoutingDelegatingHandler()
         {
             
         }
 
         public override async Task SendEventAsync(Message message)
         {
+            var stopwatch = new Stopwatch();
+            stopwatch.Start();
             await base.SendEventAsync(message);
+            stopwatch.Stop();
+            long elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
+            bool lockTaken = false;
+            try
+            {
+                SpinLock.TryEnter(1, ref lockTaken);
+                if (lockTaken)
+                {
+                    Latencies[(int)elapsedMilliseconds]++;
+                }
+            }
+            finally
+            {
+                if (lockTaken)
+                {
+                    SpinLock.Exit(false);
+                }
+            }
         }
     }
 }

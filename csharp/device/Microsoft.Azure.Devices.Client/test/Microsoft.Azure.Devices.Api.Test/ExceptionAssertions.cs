@@ -89,17 +89,23 @@ namespace Microsoft.Azure.Devices.Client.Test
 
         public static async Task<TException> ExpectedAsync<TException>(this Func<Task> action) where TException : Exception
         {
+            return (TException)await ExpectedAsync(action, typeof(TException));
+        }
+
+        public static async Task<Exception> ExpectedAsync(this Func<Task> action, Type exceptionType)
+        {
+            await Task.Yield();
             try
             {
                 await action();
             }
             catch (Exception e)
             {
-                Assert.IsInstanceOfType(e, typeof(TException), e.ToString());
-                return (TException)e;
+                Assert.IsInstanceOfType(e, exceptionType, e.ToString());
+                return e;
             }
 
-            throw new AssertFailedException($"An exception of type \"{typeof(TException)}\" was expected, but none was thrown.");
+            throw new AssertFailedException($"An exception of type \"{exceptionType}\" was expected, but none was thrown.");
         }
 
         public static Task<TException> WithAssertion<TException>(this Task<TException> exception, Action<TException> assert) where TException : Exception

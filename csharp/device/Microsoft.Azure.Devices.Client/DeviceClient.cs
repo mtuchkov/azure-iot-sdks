@@ -90,7 +90,7 @@ namespace Microsoft.Azure.Devices.Client
 
             this.innerHandler = new GateKeeperDelegatingHandler(
                 new RetryDelegatingHandler(new ErrorDelegatingHandler(
-                        () => new RoutingHandler(this.CreateTransportHandler, iotHubConnectionString, transportSettings)))
+                        () => new RoutingDelegatingHandler(this.CreateTransportHandler, iotHubConnectionString, transportSettings)))
                 );
         }
 
