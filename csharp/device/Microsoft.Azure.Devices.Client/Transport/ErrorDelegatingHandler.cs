@@ -21,22 +21,12 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
     sealed class ErrorDelegatingHandler : DefaultDelegatingHandler
     {
-        internal static readonly HashSet<Type> NonTransientExceptions = new HashSet<Type>
-        {
-            typeof(UnauthorizedException),
-            typeof(IotHubNotFoundException),
-            typeof(DeviceNotFoundException),
-            typeof(QuotaExceededException),
-        };
 
         internal static readonly HashSet<Type> TransientExceptions = new HashSet<Type>
         {
             typeof(IotHubClientTransientException),
             typeof(IotHubCommunicationException),
-            typeof(MessageTooLargeException),
-            typeof(DeviceMessageLockLostException),
             typeof(ServerBusyException),
-            typeof(IotHubException),
             typeof(IOException),
             typeof(TimeoutException),
             typeof(ObjectDisposedException),
@@ -50,8 +40,6 @@ namespace Microsoft.Azure.Devices.Client.Transport
         internal static readonly HashSet<Type> TransportTransientExceptions = new HashSet<Type>
         {
             typeof(IotHubClientTransientException),
-            typeof(MessageTooLargeException),
-            typeof(DeviceMessageLockLostException),
             typeof(ServerBusyException),
             typeof(OperationCanceledException),
             typeof(TaskCanceledException),
@@ -85,7 +73,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
                         await this.ExecuteWithErrorHandlingAsync(() => base.OpenAsync(explicitOpen), false);
                         openPromise.TryComplete();
                     }
-                    catch (Exception ex) when (IsIotHubClientTransient(ex))
+                    catch (Exception ex) when (this.IsTranportTransient(ex))
                     {
                         Reset(openPromise, handler);
                         throw;
@@ -156,7 +144,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
             {
                 if (this.IsTransient(ex))
                 {
-                    if (this.IsIotHubClientTransient(ex))
+                    if (this.IsTranportTransient(ex))
                     {
                         if (ex is IotHubClientTransientException)
                         {
@@ -194,7 +182,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
             {
                 if (this.IsTransient(ex))
                 {
-                    if (this.IsIotHubClientTransient(ex))
+                    if (this.IsTranportTransient(ex))
                     {
                         if (ex is IotHubClientTransientException)
                         {
@@ -219,27 +207,14 @@ namespace Microsoft.Azure.Devices.Client.Transport
             return this.OpenAsync(false);
         }
 
-        bool IsIotHubClientTransient(Exception exception)
+        bool IsTranportTransient(Exception exception)
         {
             return exception.Unwind(true).Any(e => TransportTransientExceptions.Contains(e.GetType()));
         }
 
         bool IsTransient(Exception exception)
         {
-            //We should check the non-transient first
-            if (exception.Unwind(true).Any(e => NonTransientExceptions.Contains(e.GetType())))
-            {
-                return false;
-            }
-
-            //Then we check transient
-            if (exception.Unwind(true).Any(e => TransientExceptions.Contains(e.GetType())))
-            {
-                return true;
-            }
-            
-            //any other exception not in the lists is a non-transient excpetion
-            return false;
+            return exception.Unwind(true).Any(e => TransientExceptions.Contains(e.GetType()));
         }
 
         void Reset(TaskCompletionSource completion, IDelegatingHandler handler)

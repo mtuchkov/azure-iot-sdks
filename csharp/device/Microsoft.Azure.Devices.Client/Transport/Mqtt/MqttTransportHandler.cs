@@ -215,7 +215,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 string expectedLockToken = this.completionQueue.Peek();
                 if (expectedLockToken != lockToken)
                 {
-                    throw new IotHubClientTransientException($"Client MUST send PUBACK packets in the order in which the corresponding PUBLISH packets were received (QoS 1 messages) per [MQTT-4.6.0-2]. Expected lock token: '{expectedLockToken}'; actual lock token: '{lockToken}'.");
+                    throw new IotHubException($"Client MUST send PUBACK packets in the order in which the corresponding PUBLISH packets were received (QoS 1 messages) per [MQTT-4.6.0-2]. Expected lock token: '{expectedLockToken}'; actual lock token: '{lockToken}'.");
                 }
 
                 this.completionQueue.Dequeue();
@@ -226,12 +226,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         public override Task AbandonAsync(string lockToken)
         {
-            throw new IotHubClientTransientException("MQTT protocol does not support this operation");
+            throw new IotHubException("MQTT protocol does not support this operation");
         }
 
         public override Task RejectAsync(string lockToken)
         {
-            throw new IotHubClientTransientException("MQTT protocol does not support this operation");
+            throw new IotHubException("MQTT protocol does not support this operation");
         }
 
         protected override void Dispose(bool disposing)

@@ -16,6 +16,18 @@ namespace Microsoft.Azure.Devices.Client.Test
     [TestClass]
     public class ErrorDelegatingHandlerTests
     {
+
+        internal static readonly HashSet<Type> NonTransientExceptions = new HashSet<Type>
+        {
+            typeof(MessageTooLargeException),
+            typeof(DeviceMessageLockLostException),
+            typeof(UnauthorizedException),
+            typeof(IotHubNotFoundException),
+            typeof(DeviceNotFoundException),
+            typeof(QuotaExceededException),
+            typeof(IotHubException),
+        };
+
         const string ErrorMessage = "Error occured.";
 
         static readonly Dictionary<Type, Func<Exception>> ExceptionFactory = new Dictionary<Type, Func<Exception>>
@@ -90,7 +102,7 @@ namespace Microsoft.Azure.Devices.Client.Test
         [TestCategory("Owner [mtuchkov]")]
         public async Task ErrorHandler_NonTransientErrorOccured_ChannelIsRecreated()
         {
-            foreach (Type exceptionType in ErrorDelegatingHandler.NonTransientExceptions)
+            foreach (Type exceptionType in NonTransientExceptions)
             {
                 await TestExceptionThrown(exceptionType, exceptionType, true);
             }

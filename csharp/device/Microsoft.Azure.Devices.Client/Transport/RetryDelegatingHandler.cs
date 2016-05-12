@@ -13,6 +13,8 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
     class RetryDelegatingHandler : DefaultDelegatingHandler
     {
+        const string StopRetrying = "StopRetrying";
+
         class SendMessageState
         {
             public int Iteration { get; set; }
@@ -22,11 +24,20 @@ namespace Microsoft.Azure.Devices.Client.Transport
             public ExceptionDispatchInfo OriginalError { get; set; }
         }
 
-        class IotHubTransientErrorIgnoreStrategy:ITransientErrorDetectionStrategy
+        class IotHubTransientErrorIgnoreStrategy : ITransientErrorDetectionStrategy
         {
             public bool IsTransient(Exception ex)
             {
-                return ex is IotHubClientTransientException && (ex.Data["stopRetrying"] == null || !(bool)ex.Data["stopRetrying"]);
+                if (!(ex is IotHubClientTransientException))
+                    return false;
+                if (ex.Data[StopRetrying] == null)
+                    return true;
+                if ((bool)ex.Data[StopRetrying])
+                {
+                    ex.Data.Remove(StopRetrying);
+                    return false;
+                }
+                return true;
             }
         }
 
@@ -39,7 +50,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
         {
             this.retryPolicy = new RetryPolicy(new IotHubTransientErrorIgnoreStrategy(), 15, TimeSpan.FromMilliseconds(100), TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(100));
             //Only for debug
-            this.retryPolicy.Retrying += RetryPolicy_Retrying;
+            this.retryPolicy.Retrying += this.RetryPolicy_Retrying;
         }
 
         //Only for debug
@@ -154,7 +165,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
             {
                 foreach (Message message in messages)
                 {
-                    sendState.InitialStreamPosition = message.BodyStream.Position > 0 ? message.BodyStream.Position : 0;
+                    sendState.InitialStreamPosition = message.BodyStream.Position > sendState.InitialStreamPosition ? message.BodyStream.Position : sendState.InitialStreamPosition;
                     message.ResetGetBodyCalled();
                 }
 
@@ -185,11 +196,17 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
         static void EnsureStreamsAreInOriginalState(SendMessageState sendState, IEnumerable<Message> messages)
         {
+            if (sendState.InitialStreamPosition != 0)
+            {
+                sendState.OriginalError.SourceException.Data[StopRetrying] = true;
+                sendState.OriginalError.Throw();
+            }
+
             foreach (Message message in messages)
             {
                 if (!message.BodyStream.CanRead)
                 {
-                    sendState.OriginalError.SourceException.Data["stopRetrying"] = true;
+                    sendState.OriginalError.SourceException.Data[StopRetrying] = true;
                     sendState.OriginalError.Throw();
                 }
 
@@ -200,14 +217,14 @@ namespace Microsoft.Azure.Devices.Client.Transport
 
                 //Initial stream position can be not 0 intentionally, i.e. users may want to send the message starting from offset.
                 //However, we don't want to store initial positions of each message, so we just leave this rare scenario to the user.
-                else if (message.BodyStream.CanSeek && sendState.InitialStreamPosition == 0)
+                else if (message.BodyStream.CanSeek)
                 {
                     message.BodyStream.Position = 0;
                     message.ResetGetBodyCalled();
                 }
                 else
                 {
-                    sendState.OriginalError.SourceException.Data["stopRetrying"] = true;
+                    sendState.OriginalError.SourceException.Data[StopRetrying] = true;
                     sendState.OriginalError.Throw();
                 }
             }
@@ -217,7 +234,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
         {
             if (!message.BodyStream.CanRead)
             {
-                sendState.OriginalError.SourceException.Data["stopRetrying"] = true;
+                sendState.OriginalError.SourceException.Data[StopRetrying] = true;
                 sendState.OriginalError.Throw();
             }
 
@@ -232,7 +249,7 @@ namespace Microsoft.Azure.Devices.Client.Transport
             }
             else
             {
-                sendState.OriginalError.SourceException.Data["stopRetrying"] = true;
+                sendState.OriginalError.SourceException.Data[StopRetrying] = true;
                 sendState.OriginalError.Throw();
             }
         }

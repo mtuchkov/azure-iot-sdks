@@ -40,10 +40,10 @@ namespace Microsoft.Azure.Devices.Client.Extensions
                     exception = exception.InnerException;
                     continue;
                 }
-                ReadOnlyCollection<Exception> execpetions = (exception as AggregateException)?.InnerExceptions;
-                if (execpetions != null)
+                ReadOnlyCollection<Exception> excepetions = (exception as AggregateException)?.InnerExceptions;
+                if (excepetions != null)
                 {
-                    foreach (Exception ex in execpetions)
+                    foreach (Exception ex in excepetions)
                     {
                         foreach (Exception innerEx in ex.Unwind(true))
                         {

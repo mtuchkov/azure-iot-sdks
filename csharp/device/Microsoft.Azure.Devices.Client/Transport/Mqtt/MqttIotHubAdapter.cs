@@ -323,14 +323,14 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             this.stateFlags = StateFlags.Connected;
 
+            this.onConnected();
+
             this.ResumeReadingIfNecessary(context);
 
             if (packet.SessionPresent)
             {
                 await this.SubscribeAsync(context);
             }
-
-            this.onConnected();
         }
         #endregion
 

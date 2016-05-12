@@ -103,30 +103,5 @@ namespace Microsoft.Azure.Devices.Client.Transport
         {
             
         }
-
-        public override async Task SendEventAsync(Message message)
-        {
-            var stopwatch = new Stopwatch();
-            stopwatch.Start();
-            await base.SendEventAsync(message);
-            stopwatch.Stop();
-            long elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
-            bool lockTaken = false;
-            try
-            {
-                SpinLock.TryEnter(1, ref lockTaken);
-                if (lockTaken)
-                {
-                    Latencies[(int)elapsedMilliseconds]++;
-                }
-            }
-            finally
-            {
-                if (lockTaken)
-                {
-                    SpinLock.Exit(false);
-                }
-            }
-        }
     }
 }

@@ -16,7 +16,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             public Dictionary<TKey, int> References { get; set; }
 
-            public DateTime LastUpdatedTime { get; set; }
+            public DateTime LastAccessedTime { get; set; }
 
             public TValue Value { get; set; }
         }
@@ -72,7 +72,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 {
                     slot.References[key]++;
                 }
-                slot.LastUpdatedTime = DateTime.UtcNow;
+                slot.LastAccessedTime = DateTime.UtcNow;
                 return slot.Value;
             }
         }
@@ -108,7 +108,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 for (int i = 0; i < poolSize; i++)
                 {
                     Slot slot = this.slots[i];
-                    if (slot.References.Count == 0 && slot.LastUpdatedTime < DateTime.UtcNow - this.keepAliveTimeout)
+                    if (slot.References.Count == 0 && slot.LastAccessedTime < DateTime.UtcNow - this.keepAliveTimeout)
                     {
                         objectsToCleanup.Add(slot.Value);
                         this.slots[i].Value = null;
